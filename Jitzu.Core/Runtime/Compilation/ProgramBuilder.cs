@@ -83,9 +83,14 @@ public static class ProgramBuilder
     {
         foreach (var expression in ast.Body.OfType<TagExpression>())
         {
+            // No version → assume the namespace is in an already-loaded BCL assembly
+            // (e.g. `#:package System.Diagnostics.Process`). Skip NuGet resolution.
+            if (string.IsNullOrEmpty(expression.Version))
+                continue;
+
             var paths = await Resolver.ResolveAsync(
                 expression.Identifier,
-                new NuGetVersion(expression.Version!),
+                new NuGetVersion(expression.Version),
                 Framework);
 
             foreach (var path in paths)
