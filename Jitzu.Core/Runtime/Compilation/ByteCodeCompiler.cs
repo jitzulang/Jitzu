@@ -14,6 +14,19 @@ public sealed class ByteCodeCompiler(RuntimeProgram program)
 {
     private Chunk _currentChunk = null!;
     private readonly Stack<ContextItem> _context = new();
+    private readonly Stack<LoopContext> _loops = new();
+
+    private sealed class LoopContext
+    {
+        // `continue` target — for while: loop top (re-evaluate condition); for `for`:
+        // the increment block (so the post-step runs). Marked when the target site is
+        // known, which may be after the body has emitted the continue jump, so we use
+        // a back-patched Label rather than a raw int.
+        public required Label ContinueLabel { get; init; }
+
+        // Forward `break` target — patched once the loop end is known.
+        public required Label BreakLabel { get; init; }
+    }
 
     public UserFunction Compile(Expression[] expressions)
     {
@@ -502,6 +515,22 @@ public sealed class ByteCodeCompiler(RuntimeProgram program)
                 CompileIfExpression(ifExpression);
                 break;
 
+            case ContinueExpression:
+            {
+                if (_loops.Count == 0)
+                    throw new InvalidOperationException("`continue` outside of a loop");
+                _currentChunk.EmitJump(OpCode.Loop, expr.Location, _loops.Peek().ContinueLabel);
+                break;
+            }
+
+            case BreakExpression:
+            {
+                if (_loops.Count == 0)
+                    throw new InvalidOperationException("`break` outside of a loop");
+                _currentChunk.EmitJump(OpCode.Jump, expr.Location, _loops.Peek().BreakLabel);
+                break;
+            }
+
             case ReturnExpression returnExpression:
                 if (returnExpression.ReturnValue is not null)
                 {
@@ -795,15 +824,23 @@ public sealed class ByteCodeCompiler(RuntimeProgram program)
         _currentChunk.Emit(getOp, forExpr.Location, counterSlot);
         _currentChunk.Emit(iterSetOp, forExpr.Location, iterSlot);
 
+        var breakLabel = Chunk.NewLabel();
+        var continueLabel = Chunk.NewLabel();
+        _loops.Push(new LoopContext { ContinueLabel = continueLabel, BreakLabel = breakLabel });
+
         // Body
         EmitBlockBody(forExpr.Body);
 
-        // Increment hidden counter
+        _loops.Pop();
+
+        // Increment hidden counter — this is the continue target
+        _currentChunk.MarkLabel(continueLabel);
         _currentChunk.Emit(getOp, forExpr.Location, counterSlot);
         _currentChunk.Emit(OpCode.Inc, forExpr.Location);
         _currentChunk.Emit(setOp, forExpr.Location, counterSlot);
 
         _currentChunk.Emit(OpCode.Loop, forExpr.Location, loopStart);
+        _currentChunk.MarkLabel(breakLabel);
         var endOfLoop = _currentChunk.Code.Count;
 
         PatchJump(jumpAddress, endOfLoop);
@@ -853,15 +890,23 @@ public sealed class ByteCodeCompiler(RuntimeProgram program)
         _currentChunk.Emit(OpCode.IndexGetDirect, forExpr.Location);
         _currentChunk.Emit(iterSetOp, forExpr.Location, iterSlot);
 
+        var breakLabel = Chunk.NewLabel();
+        var continueLabel = Chunk.NewLabel();
+        _loops.Push(new LoopContext { ContinueLabel = continueLabel, BreakLabel = breakLabel });
+
         // Body
         EmitBlockBody(forExpr.Body);
 
-        // Increment counter
+        _loops.Pop();
+
+        // Increment counter — `continue` target
+        _currentChunk.MarkLabel(continueLabel);
         _currentChunk.Emit(getOp, forExpr.Location, counterSlot);
         _currentChunk.Emit(OpCode.Inc, forExpr.Location);
         _currentChunk.Emit(setOp, forExpr.Location, counterSlot);
 
         _currentChunk.Emit(OpCode.Loop, forExpr.Location, loopStart);
+        _currentChunk.MarkLabel(breakLabel);
         var endOfLoop = _currentChunk.Code.Count;
 
         PatchJump(jumpAddress, endOfLoop);
@@ -869,15 +914,21 @@ public sealed class ByteCodeCompiler(RuntimeProgram program)
 
     private void CompileWhileExpression(WhileExpression whileExpr)
     {
+        var continueLabel = Chunk.NewLabel();
+        _currentChunk.MarkLabel(continueLabel);
         int loopStart = _currentChunk.Code.Count;
         EmitExpression(whileExpr.Condition);
 
         int jumpAddress = _currentChunk.Code.Count;
         _currentChunk.Emit(OpCode.JumpIfFalse, whileExpr.Condition.Location, 0);
 
+        var breakLabel = Chunk.NewLabel();
+        _loops.Push(new LoopContext { ContinueLabel = continueLabel, BreakLabel = breakLabel });
         EmitExpression(whileExpr.Body);
+        _loops.Pop();
 
         _currentChunk.Emit(OpCode.Loop, whileExpr.Location, loopStart);
+        _currentChunk.MarkLabel(breakLabel);
         var endOfLoop = _currentChunk.Code.Count;
 
         PatchJump(jumpAddress, endOfLoop);

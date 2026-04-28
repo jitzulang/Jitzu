@@ -505,6 +505,14 @@ public ref struct Parser(ReadOnlySpan<Token> tokens)
             case { Type: TokenType.Keyword, Value: "new" }:
                 return ParseNewKeywordExpression();
 
+            case { Type: TokenType.Keyword, Value: "continue" } continueToken:
+                MoveNext();
+                return new ContinueExpression { Location = continueToken.Span };
+
+            case { Type: TokenType.Keyword, Value: "break" } breakToken:
+                MoveNext();
+                return new BreakExpression { Location = breakToken.Span };
+
             case { Type: TokenType.Keyword } keyword:
                 throw new NotImplementedException($"Keyword {TokenFormatter.Format(keyword)} not implemented");
 

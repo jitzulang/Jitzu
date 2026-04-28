@@ -42,6 +42,9 @@ public record ReturnExpression : Expression
     public required Expression? ReturnValue { get; set; }
 }
 
+public record ContinueExpression : Expression;
+public record BreakExpression : Expression;
+
 public record TryExpression : Expression
 {
     public required KeywordLiteral TryKeyword { get; init; }
