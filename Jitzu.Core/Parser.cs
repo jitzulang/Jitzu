@@ -781,7 +781,11 @@ public ref struct Parser(ReadOnlySpan<Token> tokens)
 
         var body = ImmutableArray.CreateBuilder<Expression>();
         while (!IsNext('}'))
+        {
             body.Add(IsNext('{') ? ParseBlockBodyExpression() : ParseExpression());
+            if (_current is { Type: TokenType.Punctuation, Value: ";" })
+                MoveNext();
+        }
 
         var closeBracket = ExpectAndConsume('}');
 
