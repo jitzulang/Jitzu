@@ -267,6 +267,14 @@ public ref struct ByteCodeInterpreter
                         break;
                     }
 
+                    case OpCode.Neq:
+                    {
+                        var right = _programStack.Pop();
+                        var left = _programStack.Pop();
+                        _programStack.Push(BinaryExpressionEvaluator.NotEqual(left, right));
+                        break;
+                    }
+
                     case OpCode.Not:
                     {
                         var v = _programStack.Pop();

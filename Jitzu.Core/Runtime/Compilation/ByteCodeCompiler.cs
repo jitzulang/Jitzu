@@ -225,6 +225,7 @@ public sealed class ByteCodeCompiler(RuntimeProgram program)
                     ">=" => OpCode.Gte,
                     "is" => OpCode.Compare,
                     "==" => OpCode.Eq,
+                    "!=" => OpCode.Neq,
                     "%" => OpCode.Mod,
                     "|" => OpCode.BitwiseOr,
                     _ => throw new UnsupportedExpressionException(binOp),

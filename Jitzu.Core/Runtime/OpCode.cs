@@ -52,4 +52,5 @@ public enum OpCode : byte
     IndexGetDirect,
     NewList,
     Not,
+    Neq,
 }

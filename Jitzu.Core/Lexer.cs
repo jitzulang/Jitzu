@@ -565,6 +565,8 @@ public ref struct Lexer(ReadOnlySpan<char> filePath, ReadOnlySpan<char> input, i
         {
             ('<', '=') => "<=",
             ('<', '>') => "<>",
+            ('>', '=') => ">=",
+            ('!', '=') => "!=",
             ('+', '+') => "++",
             ('+', '=') => "+=",
             ('-', '-') => "--",

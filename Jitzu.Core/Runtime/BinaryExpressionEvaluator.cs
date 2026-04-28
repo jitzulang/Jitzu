@@ -7,6 +7,20 @@ namespace Jitzu.Core.Runtime;
 public static class BinaryExpressionEvaluator
 {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Value NotEqual(Value a, Value b) => (a.Kind, b.Kind) switch
+    {
+        (ValueKind.Int, ValueKind.Int) => Value.FromBool(a.I32 != b.I32),
+        (ValueKind.Int, ValueKind.Double) => Value.FromBool(a.I32 != b.F64),
+        (ValueKind.Double, ValueKind.Int) => Value.FromBool(a.F64 != b.I32),
+        (ValueKind.Double, ValueKind.Double) => Value.FromBool(a.F64 != b.F64),
+        (ValueKind.Bool, ValueKind.Bool) => Value.FromBool(a.B != b.B),
+        (ValueKind.Null, ValueKind.Null) => Value.FromBool(false),
+        (ValueKind.Null, _) or (_, ValueKind.Null) => Value.FromBool(true),
+        (ValueKind.Ref, ValueKind.Ref) => Value.FromBool(!Equals(a.Ref, b.Ref)),
+        _ => Value.FromBool(true)
+    };
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Value Equal(Value a, Value b) => (a.Kind, b.Kind) switch
     {
         (ValueKind.Int, ValueKind.Int) => Value.FromBool(a.I32 == b.I32),
