@@ -34,8 +34,11 @@ public readonly record struct Value
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Value FromDouble(double v) => new(ValueKind.Double, d: v);
 
+    public static readonly Value True = new(ValueKind.Bool, b: true);
+    public static readonly Value False = new(ValueKind.Bool, b: false);
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Value FromBool(bool v) => new(ValueKind.Bool, b: v);
+    public static Value FromBool(bool v) => v ? True : False;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Value FromRef(object? v) =>

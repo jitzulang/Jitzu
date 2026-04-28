@@ -10,10 +10,14 @@ public static class BinaryExpressionEvaluator
     public static Value Equal(Value a, Value b) => (a.Kind, b.Kind) switch
     {
         (ValueKind.Int, ValueKind.Int) => Value.FromBool(a.I32 == b.I32),
-        (ValueKind.Int, ValueKind.Double) => Value.FromBool(Math.Abs(a.I32 - b.F64) < 0),
-        (ValueKind.Double, ValueKind.Int) => Value.FromBool(Math.Abs(a.F64 - b.I32) < 0),
-        (ValueKind.Double, ValueKind.Double) => Value.FromBool(Math.Abs(a.F64 - b.F64) < 0),
-        _ => Throw("lt", a, b)
+        (ValueKind.Int, ValueKind.Double) => Value.FromBool(a.I32 == b.F64),
+        (ValueKind.Double, ValueKind.Int) => Value.FromBool(a.F64 == b.I32),
+        (ValueKind.Double, ValueKind.Double) => Value.FromBool(a.F64 == b.F64),
+        (ValueKind.Bool, ValueKind.Bool) => Value.FromBool(a.B == b.B),
+        (ValueKind.Null, ValueKind.Null) => Value.True,
+        (ValueKind.Null, _) or (_, ValueKind.Null) => Value.False,
+        (ValueKind.Ref, ValueKind.Ref) => Value.FromBool(Equals(a.Ref, b.Ref)),
+        _ => Value.False
     };
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
