@@ -51,5 +51,6 @@ public enum OpCode : byte
     MakeClosure,
     IndexGetDirect,
     NewList,
+    Not,
     Neq,
 }

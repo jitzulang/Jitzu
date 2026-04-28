@@ -75,6 +75,7 @@ public class AstTransformer(RuntimeProgram program)
             BlockBodyExpression e => TransformBlockBody(e, slotMapBuilder),
             FunctionCallExpression e => TransformFunctionCallExpression(e, slotMapBuilder),
             BinaryExpression e => TransformBinaryExpression(e, slotMapBuilder),
+            UnaryExpression e => e with { Operand = TransformExpression(e.Operand, slotMapBuilder) },
             IfExpression e => TransformIfExpression(e, slotMapBuilder),
             IndexerExpression e => TransformIndexerExpression(e, slotMapBuilder),
             TryExpression e => TransformTryExpression(e, slotMapBuilder),
@@ -689,6 +690,10 @@ public class AstTransformer(RuntimeProgram program)
             {
                 Left = RewriteCapturedLocals(be.Left, capturedSlots),
                 Right = RewriteCapturedLocals(be.Right, capturedSlots),
+            },
+            UnaryExpression ue => ue with
+            {
+                Operand = RewriteCapturedLocals(ue.Operand, capturedSlots),
             },
             FunctionCallExpression fce => RewriteFunctionCall(fce, capturedSlots),
             ReturnExpression re => re with

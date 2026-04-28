@@ -17,7 +17,10 @@ using System.Reflection;
 Console.OutputEncoding = Encoding.UTF8;
 EnableAnsiSupport();
 
-var options = JitzuOptions.Parse(args);
+var (hostArgs, scriptArgs) = JitzuOptions.SplitArgs(args);
+var options = JitzuOptions.Parse(hostArgs);
+if (scriptArgs.Length > 0)
+    options.ScriptArgs = scriptArgs;
 
 // Clean up leftover upgrade file from previous self-update (Windows)
 CleanupOldBinary();

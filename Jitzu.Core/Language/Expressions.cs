@@ -42,6 +42,9 @@ public record ReturnExpression : Expression
     public required Expression? ReturnValue { get; set; }
 }
 
+public record ContinueExpression : Expression;
+public record BreakExpression : Expression;
+
 public record TryExpression : Expression
 {
     public required KeywordLiteral TryKeyword { get; init; }
@@ -363,6 +366,13 @@ public record AssignmentExpression : Expression
     public required Expression Left { get; set; }
     public required Expression Right { get; set; }
     public Token Operator { get; init; }
+}
+
+public record UnaryExpression : Expression
+{
+    public required string Operator { get; init; }
+    public required Expression Operand { get; set; }
+    public override string ToString() => $"{Operator}{Operand}";
 }
 
 public record InplaceIncrementExpression : Expression

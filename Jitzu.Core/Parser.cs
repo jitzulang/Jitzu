@@ -370,6 +370,18 @@ public ref struct Parser(ReadOnlySpan<Token> tokens)
 
     private Expression ParsePrimaryExpression()
     {
+        if (_current is { Type: TokenType.Operator, Value: "!" or "-" } prefixToken)
+        {
+            MoveNext();
+            var operand = ParsePrimaryExpression();
+            return new UnaryExpression
+            {
+                Operator = prefixToken.Value,
+                Operand = operand,
+                Location = prefixToken.Span.Extend(operand.Location),
+            };
+        }
+
         switch (_current)
         {
             case { Type: TokenType.Comment } token:
@@ -492,6 +504,14 @@ public ref struct Parser(ReadOnlySpan<Token> tokens)
 
             case { Type: TokenType.Keyword, Value: "new" }:
                 return ParseNewKeywordExpression();
+
+            case { Type: TokenType.Keyword, Value: "continue" } continueToken:
+                MoveNext();
+                return new ContinueExpression { Location = continueToken.Span };
+
+            case { Type: TokenType.Keyword, Value: "break" } breakToken:
+                MoveNext();
+                return new BreakExpression { Location = breakToken.Span };
 
             case { Type: TokenType.Keyword } keyword:
                 throw new NotImplementedException($"Keyword {TokenFormatter.Format(keyword)} not implemented");
@@ -769,7 +789,11 @@ public ref struct Parser(ReadOnlySpan<Token> tokens)
 
         var body = ImmutableArray.CreateBuilder<Expression>();
         while (!IsNext('}'))
+        {
             body.Add(IsNext('{') ? ParseBlockBodyExpression() : ParseExpression());
+            if (_current is { Type: TokenType.Punctuation, Value: ";" })
+                MoveNext();
+        }
 
         var closeBracket = ExpectAndConsume('}');
 

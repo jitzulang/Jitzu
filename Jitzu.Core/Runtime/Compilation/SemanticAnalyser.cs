@@ -105,6 +105,12 @@ public class SemanticAnalyser(RuntimeProgram program)
                 return binOp;
             }
 
+            case UnaryExpression unary:
+            {
+                unary.Operand = AnalyseExpression(unary.Operand);
+                return unary;
+            }
+
             case IIdentifierLiteral identifierLiteral:
                 return AnalyseIdentifierLiteral(identifierLiteral);
 
@@ -565,6 +571,8 @@ public class SemanticAnalyser(RuntimeProgram program)
             DoubleLiteral => typeof(double),
             BooleanLiteral => typeof(bool),
             BinaryExpression e => ResolveBinaryExpressionReturnType(e),
+            UnaryExpression { Operator: "!" } => typeof(bool),
+            UnaryExpression { Operator: "-" } e => ResolveType(e.Operand),
             MatchExpression e => ResolveMatchExpressionReturnType(e),
             BlockBodyExpression e => ResolveBlockBodyReturnType(e),
             TryExpression e => e.ReturnType ?? ResolveType(e.Body),
