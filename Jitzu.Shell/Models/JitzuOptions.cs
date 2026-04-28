@@ -50,5 +50,47 @@ public partial class JitzuOptions
     public string? ScriptPath { get; init; }
 
     [Arg(Help = "Additional arguments to pass to the script")]
-    public string[] ScriptArgs { get; init; } = [];
+    public string[] ScriptArgs { get; set; } = [];
+
+    /// <summary>
+    /// Splits argv into (hostArgs, scriptArgs) so flags after the script path are
+    /// forwarded verbatim to the script instead of being eaten by the jz host parser.
+    ///
+    /// Rules:
+    /// - An explicit `--` separator splits at that token.
+    /// - Otherwise the first arg that looks like a script path (ends in .jz, or is the
+    ///   literal "upgrade", or is a file that exists) is the boundary; everything after
+    ///   it (exclusive) becomes script args.
+    /// </summary>
+    public static (string[] HostArgs, string[] ScriptArgs) SplitArgs(string[] args)
+    {
+        var dashDashIndex = Array.IndexOf(args, "--");
+        if (dashDashIndex >= 0)
+        {
+            var host = args[..dashDashIndex];
+            var script = args[(dashDashIndex + 1)..];
+            return (host, script);
+        }
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            var a = args[i];
+            if (a.Length == 0 || a[0] == '-')
+                continue;
+
+            var looksLikeScript = a.EndsWith(".jz", StringComparison.OrdinalIgnoreCase)
+                || a == "upgrade"
+                || File.Exists(a)
+                || File.Exists(Path.ChangeExtension(a, "jz"));
+
+            if (!looksLikeScript)
+                continue;
+
+            var host = args[..(i + 1)];
+            var script = args[(i + 1)..];
+            return (host, script);
+        }
+
+        return (args, []);
+    }
 }
