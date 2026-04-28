@@ -702,19 +702,24 @@ public sealed class ByteCodeCompiler(RuntimeProgram program)
     private void CompileIfExpression(IfExpression ifExpression)
     {
         EmitExpression(ifExpression.Condition);
-        int jumpOpAddress = _currentChunk.Code.Count;
+        int jumpIfFalseAddress = _currentChunk.Code.Count;
         _currentChunk.Emit(OpCode.JumpIfFalse, ifExpression.Condition.Location, 0);
 
         EmitExpression(ifExpression.Then);
 
         if (ifExpression.Else is null)
         {
-            PatchJump(jumpOpAddress, _currentChunk.Code.Count);
+            PatchJump(jumpIfFalseAddress, _currentChunk.Code.Count);
             return;
         }
 
-        PatchJump(jumpOpAddress, _currentChunk.Code.Count);
+        // Skip over the else branch when the then branch was taken.
+        int jumpOverElseAddress = _currentChunk.Code.Count;
+        _currentChunk.Emit(OpCode.Jump, ifExpression.Location, 0);
+
+        PatchJump(jumpIfFalseAddress, _currentChunk.Code.Count);
         EmitExpression(ifExpression.Else);
+        PatchJump(jumpOverElseAddress, _currentChunk.Code.Count);
     }
 
     private void EmitBlockBody(BlockBodyExpression body)
