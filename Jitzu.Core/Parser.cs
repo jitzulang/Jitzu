@@ -370,6 +370,18 @@ public ref struct Parser(ReadOnlySpan<Token> tokens)
 
     private Expression ParsePrimaryExpression()
     {
+        if (_current is { Type: TokenType.Operator, Value: "!" or "-" } prefixToken)
+        {
+            MoveNext();
+            var operand = ParsePrimaryExpression();
+            return new UnaryExpression
+            {
+                Operator = prefixToken.Value,
+                Operand = operand,
+                Location = prefixToken.Span.Extend(operand.Location),
+            };
+        }
+
         switch (_current)
         {
             case { Type: TokenType.Comment } token:
