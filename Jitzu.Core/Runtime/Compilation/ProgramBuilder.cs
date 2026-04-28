@@ -35,6 +35,57 @@ public static class ProgramBuilder
         ["Path"] = typeof(Path),
     };
 
+    // BCL types that callers commonly want available without an explicit #:package
+    // declaration. Touching the type forces its containing assembly to load before we
+    // walk AppDomain.CurrentDomain.GetAssemblies(), so the public types from System.IO,
+    // System.Console, System.Diagnostics.Process, etc. all end up registered.
+    private static readonly Type[] BclSeedTypes =
+    [
+        typeof(Environment),
+        typeof(Console),
+        typeof(Directory),
+        typeof(FileInfo),
+        typeof(DirectoryInfo),
+        typeof(FileAttributes),
+        typeof(System.Diagnostics.Process),
+        typeof(System.Diagnostics.ProcessStartInfo),
+        typeof(System.Text.Encoding),
+        typeof(System.Text.StringBuilder),
+        typeof(System.Text.RegularExpressions.Regex),
+        typeof(System.Collections.Generic.List<>),
+        typeof(System.Collections.Generic.Dictionary<,>),
+        typeof(Uri),
+        typeof(Convert),
+        typeof(Math),
+        typeof(Guid),
+        typeof(TimeSpan),
+    ];
+
+    private static void RegisterBclTypes(Dictionary<string, Type> types)
+    {
+        // Force-load assemblies that hold the seed types, then walk every loaded
+        // System.* assembly and register their public, non-nested types.
+        var seedAssemblies = BclSeedTypes.Select(t => t.Assembly).Distinct().ToHashSet();
+        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            var name = asm.GetName().Name;
+            if (name is null) continue;
+            if (!seedAssemblies.Contains(asm) && !name.StartsWith("System.", StringComparison.Ordinal))
+                continue;
+
+            Type[] exported;
+            try { exported = asm.GetExportedTypes(); }
+            catch { continue; }
+
+            foreach (var type in exported)
+            {
+                if (type.IsNested || type.FullName is null)
+                    continue;
+                types.TryAdd(type.FullName, type);
+            }
+        }
+    }
+
     public static readonly Dictionary<string, IShellFunction> BuiltInFunctions = new()
     {
         ["print"] = new ForeignFunction(GlobalFunctions.PrintStatic),
@@ -51,9 +102,12 @@ public static class ProgramBuilder
         var globalSlotMap = slotBuilder.PushScope();
         slotBuilder.Add("args");
 
+        var types = BaseTypes.ToDictionary();
+        RegisterBclTypes(types);
+
         var program = new RuntimeProgram
         {
-            Types = BaseTypes.ToDictionary(),
+            Types = types,
             SimpleTypeCache = new Dictionary<string, Type>(),
             TypeNameConflicts = new Dictionary<string, HashSet<string>>(),
             FileNamespaces = new Dictionary<string, string>(),
@@ -191,18 +245,18 @@ public static class ProgramBuilder
             fullNames.Add(fullName);
         }
 
-        // Populate cache and conflicts
+        // Populate cache and conflicts. Dedupe by Type identity — two registrations
+        // pointing at the same CLR type (e.g. BaseTypes["Path"] and the BCL walker
+        // adding "System.IO.Path") are not a real conflict.
         foreach (var (simpleName, fullNames) in simpleNameToFullNames)
         {
-            if (fullNames.Count == 1)
+            var distinctTypes = fullNames.Select(fn => types[fn]).Distinct().ToArray();
+            if (distinctTypes.Length == 1)
             {
-                // Unambiguous - add to cache
-                var fullName = fullNames.Single();
-                simpleTypeCache[simpleName] = types[fullName];
+                simpleTypeCache[simpleName] = distinctTypes[0];
             }
             else
             {
-                // Ambiguous - track for error reporting
                 typeNameConflicts[simpleName] = fullNames;
             }
         }
