@@ -377,6 +377,11 @@ public class SemanticAnalyser(RuntimeProgram program)
                     .Select(ResolveType)
                     .ToArray();
 
+                // BCL boundary: Option<T> args bind to parameters typed T (or T?).
+                // Pre-unwrap before overload resolution; the runtime ForeignFunction will
+                // unwrap actual values at the call site.
+                var resolvedArgTypes = argTypes.Select(UnwrapOptionType).ToArray();
+
                 var methodName = member.Property.ToString();
 
                 // Resolve matching overload
@@ -401,17 +406,17 @@ public class SemanticAnalyser(RuntimeProgram program)
                 }
 
                 var csharpName = CSharpMethodName(methodName);
-                if (ResolveOverload(targetType, csharpName, argTypes) is { } method)
+                if (ResolveOverload(targetType, csharpName, resolvedArgTypes) is { } method)
                 {
                     call.CachedFunction = new ForeignFunction(method);
-                    call.ReturnType = method.ReturnType;
+                    AssignNullableReturn(call, method.ReturnType, method.ReturnParameter);
                     return call;
                 }
 
                 if (GetExtensionMethod(targetType, csharpName) is { } extensionMethod)
                 {
                     call.CachedFunction = new ForeignFunction(extensionMethod);
-                    call.ReturnType = extensionMethod.ReturnType;
+                    AssignNullableReturn(call, extensionMethod.ReturnType, extensionMethod.ReturnParameter);
                     return call;
                 }
 
@@ -704,16 +709,66 @@ public class SemanticAnalyser(RuntimeProgram program)
                     .GetMember(identifierLiteral.Name)
                     .FirstOrDefault();
 
-                return s.ReturnType = member switch
+                switch (member)
                 {
-                    PropertyInfo p => p.PropertyType,
-                    _ => typeof(void)
-                };
+                    case PropertyInfo p:
+                        AssignNullableMember(s, p.PropertyType, p);
+                        return s.ReturnType!;
+                    case FieldInfo f:
+                        AssignNullableMember(s, f.FieldType, f);
+                        return s.ReturnType!;
+                    default:
+                        return s.ReturnType = typeof(void);
+                }
             }
 
             default:
                 throw new NotImplementedException();
         }
+    }
+
+    private static void AssignNullableMember(SimpleMemberAccessExpression s, Type declaredType, ICustomAttributeProvider site)
+    {
+        if (OptionBridge.IsNullableSite(declaredType, site))
+        {
+            var element = Nullable.GetUnderlyingType(declaredType) ?? declaredType;
+            s.WrapReturnElement = element;
+            s.ReturnType = typeof(Option<>).MakeGenericType(element);
+        }
+        else
+        {
+            s.ReturnType = declaredType;
+        }
+    }
+
+    private static Type SurfaceNullableAsOption(Type declaredType, ICustomAttributeProvider site)
+    {
+        if (!OptionBridge.IsNullableSite(declaredType, site))
+            return declaredType;
+
+        var element = Nullable.GetUnderlyingType(declaredType) ?? declaredType;
+        return typeof(Option<>).MakeGenericType(element);
+    }
+
+    private static void AssignNullableReturn(FunctionCallExpression call, Type returnType, ICustomAttributeProvider returnSite)
+    {
+        if (OptionBridge.IsNullableSite(returnType, returnSite))
+        {
+            var element = Nullable.GetUnderlyingType(returnType) ?? returnType;
+            call.WrapReturnElement = element;
+            call.ReturnType = typeof(Option<>).MakeGenericType(element);
+        }
+        else
+        {
+            call.ReturnType = returnType;
+        }
+    }
+
+    private static Type UnwrapOptionType(Type t)
+    {
+        if (t.IsGenericType && t.GetGenericTypeDefinition() == typeof(Option<>))
+            return t.GetGenericArguments()[0];
+        return t;
     }
 
     private Type ResolveFunctionDefinitionReturnType(FunctionDefinitionExpression functionDefinition)
@@ -874,7 +929,8 @@ public class SemanticAnalyser(RuntimeProgram program)
                     if (firstType == variantType)
                         variantExpression.VariantType = firstType;
                 }
-                else if (firstType.GetGenericTypeDefinition() == variantType.GetGenericTypeDefinition())
+                else if (variantType.IsGenericType
+                         && firstType.GetGenericTypeDefinition() == variantType.GetGenericTypeDefinition())
                     variantExpression.VariantType = firstType;
             }
         }

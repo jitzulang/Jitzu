@@ -335,6 +335,13 @@ public sealed class ByteCodeCompiler(RuntimeProgram program)
                 EmitExpression(memberExpression.Object);
                 int constIndex = _currentChunk.AddOrGetConstant(memberExpression.Property.ToString());
                 _currentChunk.Emit(OpCode.GetField, memberExpression.Property.Location, constIndex);
+
+                if (memberExpression.WrapReturnElement is { } element)
+                {
+                    var idx = _currentChunk.AddOrGetConstant(element);
+                    _currentChunk.Emit(OpCode.WrapOption, memberExpression.Location, idx);
+                }
+
                 break;
             }
 
@@ -389,6 +396,9 @@ public sealed class ByteCodeCompiler(RuntimeProgram program)
                     LocalGetExpression g => g.VariableType,
                     CapturedLocalGetExpression g => g.VariableType,
                     UpvalueGetExpression g => g.VariableType,
+                    FunctionCallExpression { ReturnType: { } rt } => rt,
+                    SimpleMemberAccessExpression { ReturnType: { } rt } => rt,
+                    IndexerExpression { ReturnType: { } rt } => rt,
                     _ => typeof(object)
                 };
 
@@ -445,7 +455,6 @@ public sealed class ByteCodeCompiler(RuntimeProgram program)
 
                                     case GlobalGetExpression getExpression:
                                     {
-                                        _currentChunk.Emit(OpCode.GetField, location, constIndex);
                                         _currentChunk.Emit(OpCode.SetGlobal, location, getExpression.SlotIndex);
                                         break;
                                     }
@@ -718,6 +727,13 @@ public sealed class ByteCodeCompiler(RuntimeProgram program)
         }
 
         _currentChunk.Emit(OpCode.Call, call.Location, argCount);
+
+        if (call.WrapReturnElement is { } element)
+        {
+            var idx = _currentChunk.AddOrGetConstant(element);
+            _currentChunk.Emit(OpCode.WrapOption, call.Location, idx);
+        }
+
         if ((!_context.TryPeek(out var context) || context != ContextItem.TryExpression)
             && (call.ReturnType == typeof(void) || call.ReturnType == typeof(Unit)))
             _currentChunk.Emit(OpCode.Pop, call.Location);

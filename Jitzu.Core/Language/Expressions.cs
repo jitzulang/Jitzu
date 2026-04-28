@@ -319,6 +319,9 @@ public record SimpleMemberAccessExpression : Expression
     public required Expression Object { get; set; }
     public required Expression Property { get; set; }
     public Type? ReturnType { get; set; }
+    /// <summary>Set when the BCL boundary surfaced a nullable member as Option&lt;T&gt;.
+    /// Holds the inner T; the bytecode compiler emits a WrapOption instruction.</summary>
+    public Type? WrapReturnElement { get; set; }
 
     public override string ToString() => $"{Object.ToString()}.{Property.ToString()}";
 }
@@ -516,6 +519,9 @@ public record FunctionCallExpression : Expression
     public Token ClosingBracket { get; init; }
     public IShellFunction? CachedFunction { get; set; }
     public Type? ReturnType { get; set; }
+    /// <summary>Set when the BCL boundary surfaced a nullable return as Option&lt;T&gt;.
+    /// Holds the inner T; the bytecode compiler emits a WrapOption instruction.</summary>
+    public Type? WrapReturnElement { get; set; }
 
     public override string ToString()
     {

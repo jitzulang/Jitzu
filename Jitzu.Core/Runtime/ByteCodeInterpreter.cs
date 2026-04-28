@@ -315,6 +315,12 @@ public ref struct ByteCodeInterpreter
                         break;
                     }
 
+                    case OpCode.WrapOption:
+                    {
+                        WrapOption();
+                        break;
+                    }
+
                     case OpCode.BitwiseOr:
                     {
                         BitwiseOr();
@@ -541,9 +547,41 @@ public ref struct ByteCodeInterpreter
         var globalIdx = ReadInt();
         var fieldName = (string)_currentFunction.Chunk.Constants[globalIdx];
         var type = subject as Type ?? subject.GetType();
-        var field = type.GetProperty(fieldName);
-        var value = field!.GetValue(subject);
-        _programStack.Push(value!);
+
+        if (type.GetProperty(fieldName) is { } prop)
+        {
+            _programStack.Push(prop.GetValue(subject) ?? Unit.Instance);
+            return;
+        }
+
+        if (type.GetField(fieldName) is { } fld)
+        {
+            _programStack.Push(fld.GetValue(subject) ?? Unit.Instance);
+            return;
+        }
+
+        throw new Exception($"Member '{fieldName}' not found on '{type.Name}'");
+    }
+
+    private void WrapOption()
+    {
+        var typeIdx = ReadInt();
+        var elementType = (Type)_currentFunction.Chunk.Constants[typeIdx];
+        var v = _programStack.Pop();
+        var wrapped = v.Kind == ValueKind.Null
+            ? OptionBridge.MakeNone(elementType)
+            : OptionBridge.MakeSome(elementType, v.AsObject());
+        _programStack.Push(wrapped);
+    }
+
+    private void PushCallResult(object? result, Type returnType)
+    {
+        // void → Unit (the absence of a return value).
+        // Any other null → ValueKind.Null (a real null reference at the BCL boundary).
+        if (returnType == typeof(void))
+            _programStack.Push(Unit.Instance);
+        else
+            _programStack.Push(Value.FromRef(result));
     }
 
     private void SetField()
@@ -573,14 +611,14 @@ public ref struct ByteCodeInterpreter
             case ForeignFunction foreignFunction:
             {
                 var result = foreignFunction.Invoke(args);
-                _programStack.Push(result ?? Unit.Instance);
+                PushCallResult(result, foreignFunction.MethodInfo.ReturnType);
                 break;
             }
 
             case MethodInfo methodInfo:
             {
                 var result = ForeignFunction.InvokeMethodInfo(methodInfo, args);
-                _programStack.Push(result ?? Unit.Instance);
+                PushCallResult(result, methodInfo.ReturnType);
                 break;
             }
 
@@ -875,7 +913,6 @@ public ref struct ByteCodeInterpreter
         _programStack.Push(items);
     }
 
-    // TODO: Review all conditions
     private void EvaluateCompare()
     {
         var scrutinee = _programStack.Pop();
@@ -883,22 +920,16 @@ public ref struct ByteCodeInterpreter
 
         if (scrutinee.AsObject() is Type comparisonType)
         {
-            var subjectType = subject.GetType();
+            var subjectObj = subject.AsObject();
+            var subjectType = subjectObj.GetType();
 
             if (typeof(IUnion).IsAssignableFrom(subjectType))
             {
-                var constructors = subjectType.GetConstructors();
-                subjectType = ((IUnion)subject.AsObject()).Value!.GetType()!;
-
-                foreach (var constructor in constructors)
-                {
-                    var firstType = constructor.GetParameters()[0].ParameterType;
-                    if (firstType != subjectType && !firstType.IsAssignableFrom(subjectType))
-                        continue;
-
-                    _programStack.Push(true);
-                    return;
-                }
+                // Match arm against an IUnion: the variant matches when comparisonType
+                // equals the type of the union's currently-held variant payload.
+                var heldType = ((IUnion)subjectObj).Value?.GetType();
+                _programStack.Push(heldType == comparisonType);
+                return;
             }
 
             var isSame = comparisonType == subjectType || comparisonType.IsAssignableFrom(subjectType);

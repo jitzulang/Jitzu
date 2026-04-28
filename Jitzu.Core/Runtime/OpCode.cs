@@ -43,6 +43,7 @@ public enum OpCode : byte
     NewDouble,
     Swap,
     UnwrapUnion,
+    WrapOption,
     BitwiseOr,
     GetUpvalue,
     SetUpvalue,
