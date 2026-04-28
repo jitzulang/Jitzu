@@ -174,6 +174,28 @@ public sealed class ByteCodeCompiler(RuntimeProgram program)
                 break;
             }
 
+            case UnaryExpression unary:
+            {
+                switch (unary.Operator)
+                {
+                    case "!":
+                        EmitExpression(unary.Operand);
+                        _currentChunk.Emit(OpCode.Not, unary.Location);
+                        break;
+
+                    case "-":
+                        // Lower `-x` to `0 - x` to reuse the existing Sub op.
+                        EmitConstant(0, unary.Location);
+                        EmitExpression(unary.Operand);
+                        _currentChunk.Emit(OpCode.Sub, unary.Location);
+                        break;
+
+                    default:
+                        throw new NotSupportedException($"Unsupported unary operator: {unary.Operator}");
+                }
+                break;
+            }
+
             case BinaryExpression binOp:
             {
                 EmitExpression(binOp.Left);

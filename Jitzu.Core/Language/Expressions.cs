@@ -365,6 +365,13 @@ public record AssignmentExpression : Expression
     public Token Operator { get; init; }
 }
 
+public record UnaryExpression : Expression
+{
+    public required string Operator { get; init; }
+    public required Expression Operand { get; set; }
+    public override string ToString() => $"{Operator}{Operand}";
+}
+
 public record InplaceIncrementExpression : Expression
 {
     public required Expression Subject { get; set; }

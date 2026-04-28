@@ -267,6 +267,16 @@ public ref struct ByteCodeInterpreter
                         break;
                     }
 
+                    case OpCode.Not:
+                    {
+                        var v = _programStack.Pop();
+                        if (v.Kind != ValueKind.Bool)
+                            throw new InvalidOperationException(
+                                $"Operator '!' requires a Bool operand, got {v.Kind}.");
+                        _programStack.Push(Value.FromBool(!v.B));
+                        break;
+                    }
+
                     case OpCode.Compare:
                     {
                         EvaluateCompare();
