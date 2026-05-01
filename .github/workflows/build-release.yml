@@ -361,7 +361,12 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add packaging/winget/
           git commit -m "Update WinGet manifests to v${VERSION}" || exit 0
-          git push
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main && git push && exit 0
+            echo "Push attempt $i failed; retrying..."
+            sleep $((RANDOM % 5 + 1))
+          done
+          exit 1
 
       - name: Submit to WinGet repository
         uses: vedantmgoyal9/winget-releaser@v2
