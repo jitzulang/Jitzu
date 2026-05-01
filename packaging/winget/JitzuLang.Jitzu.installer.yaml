@@ -1,4 +1,5 @@
-PackageIdentifier: SimonCurtis.Jz
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.9.0.schema.json
+PackageIdentifier: JitzuLang.Jitzu
 PackageVersion: 0.1.25
 InstallerType: zip
 NestedInstallerType: portable

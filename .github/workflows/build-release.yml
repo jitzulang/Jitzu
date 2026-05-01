@@ -329,17 +329,17 @@ jobs:
           HASH=${{ steps.hash.outputs.sha256 }}
           URL="https://github.com/jitzulang/jitzu/releases/download/v${VERSION}/jitzu-${VERSION}-win-x64.zip"
 
-          cat > packaging/winget/SimonCurtis.Jz.yaml <<EOF
-          PackageIdentifier: SimonCurtis.Jz
+          cat > packaging/winget/JitzuLang.Jitzu.yaml <<EOF
+          PackageIdentifier: JitzuLang.Jitzu
           PackageVersion: ${VERSION}
           DefaultLocale: en-US
           ManifestType: version
           ManifestVersion: 1.9.0
           EOF
-          sed -i 's/^          //' packaging/winget/SimonCurtis.Jz.yaml
+          sed -i 's/^          //' packaging/winget/JitzuLang.Jitzu.yaml
 
-          cat > packaging/winget/SimonCurtis.Jz.installer.yaml <<EOF
-          PackageIdentifier: SimonCurtis.Jz
+          cat > packaging/winget/JitzuLang.Jitzu.installer.yaml <<EOF
+          PackageIdentifier: JitzuLang.Jitzu
           PackageVersion: ${VERSION}
           InstallerType: zip
           NestedInstallerType: portable
@@ -353,9 +353,9 @@ jobs:
           ManifestType: installer
           ManifestVersion: 1.9.0
           EOF
-          sed -i 's/^          //' packaging/winget/SimonCurtis.Jz.installer.yaml
+          sed -i 's/^          //' packaging/winget/JitzuLang.Jitzu.installer.yaml
 
-          sed -i "s/^PackageVersion: .*/PackageVersion: ${VERSION}/" packaging/winget/SimonCurtis.Jz.locale.en-US.yaml
+          sed -i "s/^PackageVersion: .*/PackageVersion: ${VERSION}/" packaging/winget/JitzuLang.Jitzu.locale.en-US.yaml
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -371,7 +371,7 @@ jobs:
       - name: Submit to WinGet repository
         uses: vedantmgoyal9/winget-releaser@v2
         with:
-          identifier: SimonCurtis.Jz
+          identifier: JitzuLang.Jitzu
           version: ${{ steps.version.outputs.version }}
           installers-regex: '-win-x64\.zip$'
           token: ${{ secrets.WINGET_TOKEN }}
