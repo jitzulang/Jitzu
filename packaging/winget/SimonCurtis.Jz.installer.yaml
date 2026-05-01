@@ -1,6 +1,5 @@
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.9.0.schema.json
 PackageIdentifier: SimonCurtis.Jz
-PackageVersion: 0.1.22
+PackageVersion: 0.1.25
 InstallerType: zip
 NestedInstallerType: portable
 NestedInstallerFiles:
@@ -8,7 +7,7 @@ NestedInstallerFiles:
     PortableCommandAlias: jz
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/jitzulang/jitzu/releases/download/v0.1.22/jitzu-0.1.22-win-x64.zip
-    InstallerSha256: 8213a869a5e82605f6d30082775be608fab9e7020c4790424fad972b035699ba
+    InstallerUrl: https://github.com/jitzulang/jitzu/releases/download/v0.1.25/jitzu-0.1.25-win-x64.zip
+    InstallerSha256: 992997048278a1145ac3c970c0b14138c88442b4b5b200a6de57e12f20a7b3df
 ManifestType: installer
 ManifestVersion: 1.9.0
