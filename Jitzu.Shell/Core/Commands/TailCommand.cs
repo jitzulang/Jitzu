@@ -34,7 +34,7 @@ public class TailCommand(CommandContext context) : CommandBase(context), IStream
                 var reset = ThemeConfig.Reset;
                 Console.WriteLine($"{dim}Following {filePath}... (Ctrl+C to stop){reset}");
 
-                var allLines = await File.ReadAllLinesAsync(fullPath);
+                var allLines = await ReadAllLinesSharedAsync(fullPath);
                 foreach (var line in allLines.TakeLast(lineCount))
                     Console.WriteLine(line);
 
@@ -71,7 +71,7 @@ public class TailCommand(CommandContext context) : CommandBase(context), IStream
             }
 
             // Non-follow mode: read last N lines and return
-            var lines = await File.ReadAllLinesAsync(fullPath);
+            var lines = await ReadAllLinesSharedAsync(fullPath);
             return new ShellResult(ResultType.OsCommand, string.Join(Environment.NewLine, lines.TakeLast(lineCount)), null);
         }
         catch (Exception ex)
@@ -97,7 +97,7 @@ public class TailCommand(CommandContext context) : CommandBase(context), IStream
             yield break;
 
         // Yield last N lines
-        var allLines = await File.ReadAllLinesAsync(fullPath, cancellationToken);
+        var allLines = await ReadAllLinesSharedAsync(fullPath, cancellationToken);
         foreach (var line in allLines.TakeLast(lineCount))
         {
             if (cancellationToken.IsCancellationRequested) yield break;
@@ -131,6 +131,16 @@ public class TailCommand(CommandContext context) : CommandBase(context), IStream
             try { await Task.Delay(PollIntervalMs, cancellationToken); }
             catch (OperationCanceledException) { yield break; }
         }
+    }
+
+    private static async Task<List<string>> ReadAllLinesSharedAsync(string path, CancellationToken cancellationToken = default)
+    {
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream);
+        var lines = new List<string>();
+        while (await reader.ReadLineAsync(cancellationToken) is { } line)
+            lines.Add(line);
+        return lines;
     }
 
     private static (int lineCount, bool follow, string? filePath) ParseArgs(ReadOnlyMemory<string> args)
