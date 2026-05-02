@@ -1134,18 +1134,26 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
     {
         try
         {
-            var tokens = new Lexer("<pipe>", segment).Lex();
-            if (tokens.Count == 0)
+            var trimmed = segment.TrimStart();
+            if (trimmed.Length == 0)
                 return (null, []);
 
-            var funcName = tokens[0].Value;
+            // Extract leading identifier as function name
+            var nameEnd = 0;
+            while (nameEnd < trimmed.Length && (char.IsLetterOrDigit(trimmed[nameEnd]) || trimmed[nameEnd] == '_'))
+                nameEnd++;
+            if (nameEnd == 0)
+                return (null, []);
 
-            var args = new List<object>();
-            var i = 1;
-            if (i < tokens.Count && tokens[i].Value == "(")
+            var funcName = trimmed[..nameEnd];
+            var rest = trimmed[nameEnd..].TrimStart();
+
+            if (rest.StartsWith('('))
             {
-                // Jitzu-style: grep("test", 2)
-                i++; // skip '('
+                // Jitzu-style: grep("test", 2) — use the language lexer to handle literals/commas.
+                var tokens = new Lexer("<pipe>", rest).Lex();
+                var args = new List<object>();
+                var i = 1; // skip '('
                 while (i < tokens.Count && tokens[i].Value != ")")
                 {
                     var token = tokens[i];
@@ -1154,22 +1162,19 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
                         i++;
                         continue;
                     }
-
                     args.Add(ParseTokenValue(token));
                     i++;
                 }
-            }
-            else
-            {
-                // Shell-style: grep "test" or nth 2
-                while (i < tokens.Count)
-                {
-                    args.Add(ParseTokenValue(tokens[i]));
-                    i++;
-                }
+                return (funcName, args.ToArray());
             }
 
-            return (funcName, args.ToArray());
+            // Shell-style: tee output.txt, grep "test", nth 2.
+            // Use CommandLineParser so that filenames with dots/slashes survive intact;
+            // the Jitzu lexer would split `output.txt` into three tokens.
+            var shellArgs = CommandLineParser.SplitCommandLine(rest)
+                .Select(s => (object)(int.TryParse(s, out var n) ? n : s))
+                .ToArray();
+            return (funcName, shellArgs);
         }
         catch
         {
