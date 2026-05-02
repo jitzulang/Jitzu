@@ -78,6 +78,7 @@ public class BuiltinCommands
         var statCommand = new StatCommand(_context);
         var chmodCommand = new ChmodCommand(_context);
         var whoamiCommand = new WhoamiCommand(_context);
+        var whoCommand = new WhoCommand(_context);
         var hostnameCommand = new HostnameCommand(_context);
         var uptimeCommand = new UptimeCommand(_context);
         var sleepCommand = new SleepCommand(_context);
@@ -157,6 +158,7 @@ public class BuiltinCommands
             ["stat"] = statCommand.ExecuteAsync,
             ["chmod"] = chmodCommand.ExecuteAsync,
             ["whoami"] = whoamiCommand.ExecuteAsync,
+            ["who"] = whoCommand.ExecuteAsync,
             ["hostname"] = hostnameCommand.ExecuteAsync,
             ["uptime"] = uptimeCommand.ExecuteAsync,
             ["sleep"] = sleepCommand.ExecuteAsync,
