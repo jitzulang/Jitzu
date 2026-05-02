@@ -1,6 +1,5 @@
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.9.0.schema.json
 PackageIdentifier: JitzuLang.Jitzu
-PackageVersion: 0.1.25
+PackageVersion: 0.1.26
 InstallerType: zip
 NestedInstallerType: portable
 NestedInstallerFiles:
@@ -8,7 +7,7 @@ NestedInstallerFiles:
     PortableCommandAlias: jz
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/jitzulang/jitzu/releases/download/v0.1.25/jitzu-0.1.25-win-x64.zip
-    InstallerSha256: 992997048278a1145ac3c970c0b14138c88442b4b5b200a6de57e12f20a7b3df
+    InstallerUrl: https://github.com/jitzulang/jitzu/releases/download/v0.1.26/jitzu-0.1.26-win-x64.zip
+    InstallerSha256: 0b32479912675050329c02cf71737af2f8762c59e6fb7cfa1a86a653a4db6a2b
 ManifestType: installer
 ManifestVersion: 1.9.0
