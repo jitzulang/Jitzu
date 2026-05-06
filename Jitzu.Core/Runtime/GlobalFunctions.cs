@@ -1,4 +1,5 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using Jitzu.Core.Logging;
 using Jitzu.Core.Types;
 
@@ -80,6 +81,53 @@ public static class GlobalFunctions
         var matched = lines.Where(line => line.Contains(pattern, StringComparison.OrdinalIgnoreCase));
         return string.Join('\n', matched);
     }
+
+    public static ProcessOutput RunStatic(string file, object? argsObj)
+    {
+        var args = CoerceArgs(argsObj);
+        var psi = new ProcessStartInfo(file)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var a in args)
+            psi.ArgumentList.Add(a);
+
+        try
+        {
+            using var p = Process.Start(psi);
+            if (p is null)
+                return new ProcessOutput("", $"Failed to start: {file}", -1);
+
+            var stdout = p.StandardOutput.ReadToEnd();
+            var stderr = p.StandardError.ReadToEnd();
+            p.WaitForExit();
+
+            return new ProcessOutput(stdout, stderr, p.ExitCode);
+        }
+        catch (Exception ex)
+        {
+            return new ProcessOutput("", ex.Message, -1);
+        }
+    }
+
+    private static List<string> CoerceArgs(object? argsObj) => argsObj switch
+    {
+        null => new List<string>(),
+        string s => new List<string> { s },
+        IEnumerable<object?> objs => objs.Select(Stringify).ToList(),
+        System.Collections.IEnumerable e => e.Cast<object?>().Select(Stringify).ToList(),
+        _ => new List<string> { Stringify(argsObj) }
+    };
+
+    private static string Stringify(object? o) => o switch
+    {
+        null => "",
+        Value v => v.AsObject()?.ToString() ?? "",
+        _ => o.ToString() ?? ""
+    };
 
     private static string[] SplitLines(string input)
     {

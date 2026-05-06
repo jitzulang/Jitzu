@@ -1,4 +1,6 @@
 using Shouldly;
+using Jitzu.Core;
+using Jitzu.Core.Language;
 
 namespace Jitzu.Tests;
 
@@ -46,5 +48,19 @@ public class UnaryExpressionTests
                               """;
         var output = await InterpreterTestHarness.RunAsync(source);
         output.ShouldBe("-5");
+    }
+
+    [Test]
+    public void Bang_AppliesToFullPostfixFunctionCall()
+    {
+        var expressions = Parser.Parse("", "!Directory.Exists(\"definitely-not-here\")");
+
+        var unary = expressions.Single().ShouldBeOfType<UnaryExpression>();
+        unary.Operator.ShouldBe("!");
+
+        var call = unary.Operand.ShouldBeOfType<FunctionCallExpression>();
+        var member = call.Identifier.ShouldBeOfType<SimpleMemberAccessExpression>();
+        member.Object.ShouldBeOfType<IdentifierLiteral>().Name.ShouldBe("Directory");
+        member.Property.ShouldBeOfType<IdentifierLiteral>().Name.ShouldBe("Exists");
     }
 }

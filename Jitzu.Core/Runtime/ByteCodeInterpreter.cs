@@ -622,6 +622,13 @@ public ref struct ByteCodeInterpreter
                 break;
             }
 
+            case Type type:
+            {
+                var ctorArgs = args.Select(arg => OptionBridge.UnwrapOption(arg.AsObject())).ToArray();
+                _programStack.Push(Activator.CreateInstance(type, ctorArgs)!);
+                break;
+            }
+
             case Closure closure:
             {
                 // Save current frame state (including current closure)

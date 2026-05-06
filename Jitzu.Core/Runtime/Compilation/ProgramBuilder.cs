@@ -94,6 +94,7 @@ public static class ProgramBuilder
         ["last"] = new ForeignFunction(GlobalFunctions.LastStatic),
         ["nth"] = new ForeignFunction(GlobalFunctions.NthStatic),
         ["grep"] = new ForeignFunction(GlobalFunctions.GrepStatic),
+        ["run"] = new ForeignFunction(GlobalFunctions.RunStatic),
     };
 
     public static async Task<RuntimeProgram> Build(ScriptExpression ast)

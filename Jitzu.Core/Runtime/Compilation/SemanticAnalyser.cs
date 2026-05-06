@@ -7,6 +7,23 @@ namespace Jitzu.Core.Runtime.Compilation;
 
 public class SemanticAnalyser(RuntimeProgram program)
 {
+    // Slot index → declared/inferred type for the local at that slot, scoped per function.
+    // Top-level uses the bottom dict; each function/lambda pushes a fresh one.
+    private readonly Stack<Dictionary<int, Type>> _localTypes = new(new[] { new Dictionary<int, Type>() });
+
+    private void RecordLocalType(int slot, Type type) => _localTypes.Peek()[slot] = type;
+
+    private bool TryGetLocalType(int slot, out Type type)
+    {
+        if (_localTypes.Peek().TryGetValue(slot, out var t))
+        {
+            type = t;
+            return true;
+        }
+        type = typeof(void);
+        return false;
+    }
+
     public ScriptExpression AnalyseScript(ScriptExpression expression)
     {
         // Phase 1: register headers
@@ -183,6 +200,20 @@ public class SemanticAnalyser(RuntimeProgram program)
 
             case ForExpression forExpression:
                 forExpression.Range = AnalyseExpression(forExpression.Range);
+                if (InferIterableElementType(forExpression.Range) is { } itemType)
+                {
+                    switch (forExpression.Identifier)
+                    {
+                        case LocalGetExpression iterLocal:
+                            RecordLocalType(iterLocal.SlotIndex, itemType);
+                            iterLocal.VariableType = itemType;
+                            break;
+                        case GlobalGetExpression iterGlobal:
+                            iterGlobal.VariableType = itemType;
+                            program.Globals[iterGlobal.Name] = itemType;
+                            break;
+                    }
+                }
                 for (var i = 0; i < forExpression.Body.Expressions.Length; i++)
                     forExpression.Body.Expressions[i] = AnalyseExpression(forExpression.Body.Expressions[i]);
                 return forExpression;
@@ -228,6 +259,9 @@ public class SemanticAnalyser(RuntimeProgram program)
             case LocalSetExpression localSet:
             {
                 localSet = localSet with { ValueExpression = AnalyseExpression(localSet.ValueExpression) };
+                var setType = ResolveType(localSet.ValueExpression);
+                if (setType != typeof(void))
+                    RecordLocalType(localSet.SlotIndex, setType);
                 return localSet;
             }
 
@@ -254,24 +288,37 @@ public class SemanticAnalyser(RuntimeProgram program)
     {
         var paramTypes = new List<UserFunctionParameter>();
 
-        if (functionDefinition.Parameters.Self is not null
-            && instanceType is not null)
+        // Fresh local-type scope for this function. Param slots are assigned in
+        // declaration order in AstTransformer.TransformFunctionBody (self first if present).
+        _localTypes.Push(new Dictionary<int, Type>());
+        try
         {
-            paramTypes.Add(new UserFunctionParameter("self", instanceType, IsSelf: true));
-        }
+            var slot = 0;
+            if (functionDefinition.Parameters.Self is not null
+                && instanceType is not null)
+            {
+                paramTypes.Add(new UserFunctionParameter("self", instanceType, IsSelf: true));
+                RecordLocalType(slot++, instanceType);
+            }
 
-        foreach (var functionParam in functionDefinition.Parameters.Parameters)
+            foreach (var functionParam in functionDefinition.Parameters.Parameters)
+            {
+                functionParam.Type = AnalyseExpression(functionParam.Type);
+                var paramType = ResolveType(functionParam.Type);
+                paramTypes.Add(new UserFunctionParameter(functionParam.Identifier.Name, paramType));
+                RecordLocalType(slot++, paramType);
+            }
+
+            for (var i = 0; i < functionDefinition.Body.Length; i++)
+                functionDefinition.Body[i] = AnalyseExpression(functionDefinition.Body[i]);
+
+            if (functionDefinition.ReturnType is not null)
+                functionDefinition.ReturnType = AnalyseExpression(functionDefinition.ReturnType);
+        }
+        finally
         {
-            functionParam.Type = AnalyseExpression(functionParam.Type);
-            var paramType = ResolveType(functionParam.Type);
-            paramTypes.Add(new UserFunctionParameter(functionParam.Identifier.Name, paramType));
+            _localTypes.Pop();
         }
-
-        for (var i = 0; i < functionDefinition.Body.Length; i++)
-            functionDefinition.Body[i] = AnalyseExpression(functionDefinition.Body[i]);
-
-        if (functionDefinition.ReturnType is not null)
-            functionDefinition.ReturnType = AnalyseExpression(functionDefinition.ReturnType);
 
         var functionName = functionDefinition.Identifier.Name;
         var returnType = ResolveFunctionDefinitionReturnType(functionDefinition);
@@ -366,6 +413,13 @@ public class SemanticAnalyser(RuntimeProgram program)
                     UserFunction uf => uf.FunctionReturnType,
                     _ => call.ReturnType
                 };
+                return call;
+
+            // Type-as-constructor: `FileInfo("x")` constructs a FileInfo. The runtime
+            // dispatches via Activator; the analyser only needs to surface the return type
+            // so chained member access (e.g. `FileInfo("x").Attributes`) can resolve.
+            case IIdentifierLiteral ident when program.SimpleTypeCache.TryGetValue(ident.Name, out var type):
+                call.ReturnType = type;
                 return call;
 
             case SimpleMemberAccessExpression member:
@@ -565,6 +619,24 @@ public class SemanticAnalyser(RuntimeProgram program)
         return thisParam.IsInterface && thisParam.IsAssignableFrom(extendedType);
     }
 
+    private static Type? InferIterableElementType(Expression range)
+    {
+        // Array literal expression: take the first element's static type.
+        if (range is QuickArrayInitialisationExpression { Expressions.Length: > 0 } arr)
+        {
+            return arr.Expressions[0] switch
+            {
+                StringLiteral or InterpolatedStringExpression => typeof(string),
+                IntLiteral => typeof(int),
+                DoubleLiteral => typeof(double),
+                BooleanLiteral => typeof(bool),
+                CharLiteral => typeof(char),
+                _ => null,
+            };
+        }
+        return null;
+    }
+
     private Type ResolveType(Expression expr)
     {
         return expr switch
@@ -593,6 +665,11 @@ public class SemanticAnalyser(RuntimeProgram program)
             GlobalGetExpression { VariableType: { } varType } => varType,
             GlobalGetExpression g when program.SimpleTypeCache.TryGetValue(g.Name, out var type) => type,
             GlobalGetExpression g when program.Globals.TryGetValue(g.Name, out var type) => type,
+            LocalGetExpression { VariableType: { } varType } => varType,
+            LocalGetExpression lg when TryGetLocalType(lg.SlotIndex, out var type) => type,
+            // Type references inside function bodies become LocalGetExpressions whose Name
+            // matches a registered type (e.g. `Path.Combine(...)`).
+            LocalGetExpression lg when program.SimpleTypeCache.TryGetValue(lg.Name, out var type) => type,
             IndexerExpression i => ResolveType(i.Identifier) switch
             {
                 { IsArray: true } arrayType => MakeSomeType(arrayType.GetElementType()!),

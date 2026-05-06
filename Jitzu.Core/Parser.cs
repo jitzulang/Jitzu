@@ -368,12 +368,62 @@ public ref struct Parser(ReadOnlySpan<Token> tokens)
         _ => 0,
     };
 
+    private Expression ParsePostfixChain(Expression expression)
+    {
+        while (true)
+        {
+            if (TryConsume('.'))
+            {
+                var property = ParsePrimaryExpression();
+                expression = new SimpleMemberAccessExpression
+                {
+                    Object = expression,
+                    Property = property,
+                    Location = expression.Location.Extend(property.Location)
+                };
+            }
+            else if (TryConsume("(", out var openBracket))
+            {
+                var args = ParseFunctionArguments();
+                var closingBracket = Take();
+                expression = new FunctionCallExpression
+                {
+                    Identifier = expression,
+                    OpeningBracket = openBracket,
+                    Arguments = args,
+                    ClosingBracket = closingBracket,
+                    Location = expression.Location.Extend(closingBracket.Span)
+                };
+            }
+            else if (IsNext('['))
+            {
+                var squareBracketOpen = Take();
+                var indexExpression = ParsePrimaryExpression();
+                var squareBracketClose = ExpectAndConsume(']');
+                expression = new IndexerExpression
+                {
+                    Identifier = expression,
+                    SquareBracketOpen = squareBracketOpen,
+                    Index = indexExpression,
+                    SquareBracketClose = squareBracketClose,
+                    Location = expression.Location.Extend(squareBracketClose.Span),
+                };
+            }
+            else
+            {
+                return expression;
+            }
+        }
+    }
+
     private Expression ParsePrimaryExpression()
     {
         if (_current is { Type: TokenType.Operator, Value: "!" or "-" } prefixToken)
         {
             MoveNext();
-            var operand = ParsePrimaryExpression();
+            // Apply unary to the full postfix chain, so `!Directory.Exists(x)` is
+            // parsed as `!(Directory.Exists(x))` rather than `(!Directory).Exists(x)`.
+            var operand = ParsePostfixChain(ParsePrimaryExpression());
             return new UnaryExpression
             {
                 Operator = prefixToken.Value,

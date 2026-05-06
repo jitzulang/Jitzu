@@ -86,6 +86,45 @@ public class BclOptionBridgingTests
     }
 
     [Test]
+    public async Task BclTypeReference_InsideFunctionBody_ResolvesStaticMemberCall()
+    {
+        var input = Path.Combine("a", "b", "c.txt");
+        var expected = Path.GetFileName(input);
+        const string source = """
+                              fun name(path: String): String {
+                                  match Path.GetFileName(path) {
+                                      Some(n) => n,
+                                      None    => "",
+                                  }
+                              }
+                              print(name(args[0]))
+                              """;
+
+        var output = await InterpreterTestHarness.RunAsync(source, [input]);
+        output.ShouldBe(expected);
+    }
+
+    [Test]
+    public async Task BclTypeConstructor_AllowsChainedMemberAccess()
+    {
+        var file = Path.Combine(Path.GetTempPath(), $"jitzu_bcl_{Guid.NewGuid():N}.txt");
+        await File.WriteAllTextAsync(file, "hello");
+        try
+        {
+            const string source = """
+                                  print(FileInfo(args[0]).Name)
+                                  """;
+
+            var output = await InterpreterTestHarness.RunAsync(source, [file]);
+            output.ShouldBe(Path.GetFileName(file));
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Test]
     public void NullableProperty_OnBclType_SurfacesAsOption_DirectUnit()
     {
         // FileInfo.LinkTarget is a string? property — exercise the wrap helper directly.
