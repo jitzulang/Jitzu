@@ -6,6 +6,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -367,11 +371,3 @@ jobs:
             sleep $((RANDOM % 5 + 1))
           done
           exit 1
-
-      - name: Submit to WinGet repository
-        uses: vedantmgoyal9/winget-releaser@v2
-        with:
-          identifier: JitzuLang.Jitzu
-          version: ${{ steps.version.outputs.version }}
-          installers-regex: '-win-x64\.zip$'
-          token: ${{ secrets.WINGET_TOKEN }}
