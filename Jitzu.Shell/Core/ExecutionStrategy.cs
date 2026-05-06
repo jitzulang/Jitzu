@@ -836,6 +836,7 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
                 return new ShellResult(ResultType.Error, "", new Exception($"Failed to start shell pipeline"));
 
             await process.WaitForExitSuppressingCancelAsync();
+            EnsurePromptStartsOnNewLine();
             return new ShellResult(ResultType.OsCommand, "", null);
         }
         catch (Exception ex)
@@ -913,6 +914,7 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
             }
 
             await process.WaitForExitSuppressingCancelAsync();
+            EnsurePromptStartsOnNewLine();
 
             // Return empty output since we let the command write directly to console
             return new ShellResult(ResultType.OsCommand, "", null);
@@ -1386,6 +1388,7 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
             });
 
             await process.WaitForExitSuppressingCancelAsync();
+            EnsurePromptStartsOnNewLine();
             return new ShellResult(ResultType.OsCommand, "", null);
         }
         catch (Exception ex)
@@ -1585,6 +1588,22 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
         // Return the lines for potential further processing
         foreach (var line in lines)
             yield return line;
+    }
+
+    private static void EnsurePromptStartsOnNewLine()
+    {
+        if (Console.IsOutputRedirected)
+            return;
+
+        try
+        {
+            if (Console.CursorLeft != 0)
+                Console.WriteLine();
+        }
+        catch (IOException)
+        {
+            // Some terminal hosts do not expose cursor position.
+        }
     }
 
 }
