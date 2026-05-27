@@ -267,6 +267,7 @@ static async Task RunReplAsync(JitzuOptions options)
             }
             else
             {
+                TerminalIntegration.ReportCurrentDirectory();
                 Console.Write("\e[?25l"); // hide cursor during prompt build + render
 
                 // Notify about completed background jobs
