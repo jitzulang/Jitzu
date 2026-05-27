@@ -466,9 +466,12 @@ static void CleanupOldBinary()
     {
         var processPath = Environment.ProcessPath;
         if (processPath is null) return;
-        var oldPath = processPath + ".old";
-        if (File.Exists(oldPath))
-            File.Delete(oldPath);
+
+        foreach (var oldPath in Jitzu.Shell.Infrastructure.Update.SelfUpdater.GetOldPathsToClean(processPath))
+        {
+            if (File.Exists(oldPath))
+                File.Delete(oldPath);
+        }
     }
     catch
     {

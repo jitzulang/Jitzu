@@ -119,9 +119,7 @@ public static class SelfUpdater
             if (OperatingSystem.IsWindows())
             {
                 // Windows: rename current → .old, copy new to original path
-                var oldPath = currentPath + ".old";
-                if (File.Exists(oldPath))
-                    File.Delete(oldPath);
+                var oldPath = GetAvailableOldPath(currentPath);
                 File.Move(currentPath, oldPath);
                 File.Copy(newBinaryPath, currentPath);
             }
@@ -160,6 +158,38 @@ public static class SelfUpdater
             return "linux-x64";
 
         return null;
+    }
+
+    internal static string GetAvailableOldPath(string currentPath)
+    {
+        var oldPath = currentPath + ".old";
+        if (!File.Exists(oldPath))
+            return oldPath;
+
+        for (var i = 2; ; i++)
+        {
+            var candidate = $"{oldPath}.{i}";
+            if (!File.Exists(candidate))
+                return candidate;
+        }
+    }
+
+    internal static IEnumerable<string> GetOldPathsToClean(string currentPath)
+    {
+        var oldPath = currentPath + ".old";
+        if (!File.Exists(oldPath))
+            yield break;
+
+        yield return oldPath;
+
+        for (var i = 2; ; i++)
+        {
+            var candidate = $"{oldPath}.{i}";
+            if (!File.Exists(candidate))
+                yield break;
+
+            yield return candidate;
+        }
     }
 }
 
