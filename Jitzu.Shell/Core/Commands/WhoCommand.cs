@@ -22,8 +22,11 @@ public class WhoCommand : CommandBase
             return DescribeProcess(pid);
 
         var path = ExpandPath(arg);
-        if (File.Exists(path) || Directory.Exists(path))
+        if (File.Exists(path))
             return await DescribeFileLocksAsync(path);
+
+        if (Directory.Exists(path))
+            return await DescribeDirectoryLocksAsync(path);
 
         return new ShellResult(ResultType.Error, "", new Exception($"who: '{arg}' is not a PID or existing path"));
     }
@@ -84,12 +87,7 @@ public class WhoCommand : CommandBase
     {
         try
         {
-            List<(int Pid, string Name)> holders;
-
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                holders = WhoWindowsLocks.GetProcessesLockingFile(path);
-            else
-                holders = await GetProcessesLockingFileUnixAsync(path);
+            var holders = await GetProcessesLockingFileAsync(path);
 
             if (holders.Count == 0)
                 return new ShellResult(ResultType.OsCommand, $"No processes hold a lock on '{path}'.", null);
@@ -108,6 +106,117 @@ public class WhoCommand : CommandBase
         {
             return new ShellResult(ResultType.Error, "", ex);
         }
+    }
+
+    private async Task<ShellResult> DescribeDirectoryLocksAsync(string path)
+    {
+        try
+        {
+            var lockedFiles = new List<(string Path, List<(int Pid, string Name)> Holders)>();
+            var protectedEntries = new List<(string Path, FileAttributes Attributes)>();
+            var checkedFiles = 0;
+
+            foreach (var entry in EnumerateFileSystemEntriesSafe(path))
+            {
+                var attributes = GetAttributesOrDefault(entry);
+                if ((attributes & (FileAttributes.ReadOnly | FileAttributes.System)) != 0)
+                    protectedEntries.Add((entry, attributes));
+
+                if (!Directory.Exists(entry))
+                {
+                    checkedFiles++;
+                    var holders = await GetProcessesLockingFileAsync(entry);
+                    if (holders.Count > 0)
+                        lockedFiles.Add((entry, holders));
+                }
+            }
+
+            if (lockedFiles.Count == 0 && protectedEntries.Count == 0)
+                return new ShellResult(ResultType.OsCommand,
+                    $"No processes hold a lock on files under '{path}' ({checkedFiles} file(s) checked).", null);
+
+            var sb = new StringBuilder();
+            var label = Theme["ls.config"];
+            var reset = ThemeConfig.Reset;
+            var totalHolders = lockedFiles.Sum(file => file.Holders.Count);
+
+            sb.AppendLine($"{label}Directory:{reset} {path}");
+            sb.AppendLine($"{label}Checked:{reset} {checkedFiles} file(s)");
+            if (lockedFiles.Count > 0)
+                sb.AppendLine($"{label}Held by {totalHolders} process(es) across {lockedFiles.Count} file(s):{reset}");
+            else
+                sb.AppendLine($"{label}Process locks:{reset} none found");
+
+            foreach (var lockedFile in lockedFiles)
+            {
+                sb.AppendLine(Path.GetRelativePath(path, lockedFile.Path));
+                foreach (var (hpid, hname) in lockedFile.Holders)
+                    sb.AppendLine($"  {hpid,8}  {hname}");
+            }
+
+            if (protectedEntries.Count > 0)
+            {
+                sb.AppendLine($"{label}Delete-blocking attributes on {protectedEntries.Count} entr{(protectedEntries.Count == 1 ? "y" : "ies")}:{reset}");
+                foreach (var (entry, attributes) in protectedEntries)
+                    sb.AppendLine($"  {FormatAttributes(attributes),-16} {Path.GetRelativePath(path, entry)}");
+            }
+
+            return new ShellResult(ResultType.OsCommand, sb.ToString().TrimEnd(), null);
+        }
+        catch (Exception ex)
+        {
+            return new ShellResult(ResultType.Error, "", ex);
+        }
+    }
+
+    private static async Task<List<(int Pid, string Name)>> GetProcessesLockingFileAsync(string path)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return WhoWindowsLocks.GetProcessesLockingFile(path);
+
+        return await GetProcessesLockingFileUnixAsync(path);
+    }
+
+    private static IEnumerable<string> EnumerateFileSystemEntriesSafe(string path)
+    {
+        var pending = new Stack<string>();
+        pending.Push(path);
+
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+
+            IEnumerable<string> files;
+            try { files = Directory.EnumerateFiles(current).ToArray(); }
+            catch { files = Array.Empty<string>(); }
+
+            foreach (var file in files)
+                yield return file;
+
+            IEnumerable<string> directories;
+            try { directories = Directory.EnumerateDirectories(current).ToArray(); }
+            catch { directories = Array.Empty<string>(); }
+
+            foreach (var directory in directories)
+            {
+                yield return directory;
+                pending.Push(directory);
+            }
+        }
+    }
+
+    private static FileAttributes GetAttributesOrDefault(string path)
+    {
+        try { return File.GetAttributes(path); }
+        catch { return default; }
+    }
+
+    private static string FormatAttributes(FileAttributes attributes)
+    {
+        var parts = new List<string>();
+        if (attributes.HasFlag(FileAttributes.ReadOnly)) parts.Add("ReadOnly");
+        if (attributes.HasFlag(FileAttributes.System)) parts.Add("System");
+        return string.Join(",", parts);
     }
 
     private static async Task<List<(int Pid, string Name)>> GetProcessesLockingFileUnixAsync(string path)

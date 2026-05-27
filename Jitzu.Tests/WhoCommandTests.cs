@@ -40,9 +40,9 @@ public class WhoCommandTests : IDisposable
         var result = await _cmd.ExecuteAsync(new[] { pid.ToString() }.AsMemory());
 
         result.Type.ShouldBe(ResultType.OsCommand);
-        result.Output.ShouldContain(pid.ToString());
-        result.Output.ShouldContain("PID");
-        result.Output.ShouldContain("Name");
+        result.Output!.ShouldContain(pid.ToString());
+        result.Output!.ShouldContain("PID");
+        result.Output!.ShouldContain("Name");
     }
 
     [Test]
@@ -72,6 +72,39 @@ public class WhoCommandTests : IDisposable
     }
 
     [Test]
+    public async Task Who_Directory_ChecksFilesRecursively()
+    {
+        var subDir = Path.Combine(_tempDir, "nested");
+        Directory.CreateDirectory(subDir);
+        var file = Path.Combine(subDir, "free.txt");
+        await File.WriteAllTextAsync(file, "hello");
+
+        var result = await _cmd.ExecuteAsync(new[] { _tempDir }.AsMemory());
+
+        result.Type.ShouldBe(ResultType.OsCommand);
+        result.Output!.ShouldContain("files under");
+        result.Output!.ShouldContain("1 file(s) checked");
+    }
+
+    [Test]
+    public async Task Who_Directory_ReportsDeleteBlockingAttributes()
+    {
+        var subDir = Path.Combine(_tempDir, ".git", "objects");
+        Directory.CreateDirectory(subDir);
+        var file = Path.Combine(subDir, "6b78e8ecafdac572119ccfab36ceb330f92190");
+        await File.WriteAllTextAsync(file, "data");
+        File.SetAttributes(file, File.GetAttributes(file) | FileAttributes.ReadOnly);
+
+        var result = await _cmd.ExecuteAsync(new[] { _tempDir }.AsMemory());
+
+        result.Type.ShouldBe(ResultType.OsCommand);
+        result.Output!.ShouldContain("Process locks");
+        result.Output!.ShouldContain("Delete-blocking attributes");
+        result.Output!.ShouldContain("ReadOnly");
+        result.Output!.ShouldContain("6b78e8ecafdac572119ccfab36ceb330f92190");
+    }
+
+    [Test]
     public async Task Who_LockedFile_ReportsHolder()
     {
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsWindows())
@@ -85,6 +118,27 @@ public class WhoCommandTests : IDisposable
         var result = await _cmd.ExecuteAsync(new[] { file }.AsMemory());
 
         result.Type.ShouldBe(ResultType.OsCommand);
-        result.Output.ShouldContain(Environment.ProcessId.ToString());
+        result.Output!.ShouldContain(Environment.ProcessId.ToString());
+    }
+
+    [Test]
+    public async Task Who_LockedDirectory_ReportsNestedHolder()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsWindows())
+            return;
+
+        var subDir = Path.Combine(_tempDir, "nested");
+        Directory.CreateDirectory(subDir);
+        var file = Path.Combine(subDir, "locked.txt");
+        await File.WriteAllTextAsync(file, "data");
+
+        await using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        var result = await _cmd.ExecuteAsync(new[] { _tempDir }.AsMemory());
+
+        result.Type.ShouldBe(ResultType.OsCommand);
+        result.Output!.ShouldContain("nested");
+        result.Output!.ShouldContain("locked.txt");
+        result.Output!.ShouldContain(Environment.ProcessId.ToString());
     }
 }
