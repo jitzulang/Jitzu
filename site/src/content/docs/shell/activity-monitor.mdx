@@ -119,6 +119,7 @@ Default interval is 2 seconds. Use `-n` to specify a different interval.
   </thead>
   <tbody>
     <tr><td><code>kill [-9] pid</code></td><td>Kill a process by PID or <code>%jobid</code></td></tr>
+    <tr><td><code>kill [-9] --port port</code></td><td>Kill process(es) listening on a TCP port</td></tr>
     <tr><td><code>killall [-9] name</code></td><td>Kill all processes matching a name</td></tr>
   </tbody>
 </table>
@@ -131,6 +132,9 @@ Process 12345 terminated.
 
 > kill -9 12345
 Process 12345 killed.
+
+> kill --port 3000
+Killed process 45678 listening on port 3000
 
 > killall node
 Killed 3 process(es) named 'node'.`} />

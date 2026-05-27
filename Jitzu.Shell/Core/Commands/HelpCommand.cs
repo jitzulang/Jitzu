@@ -46,6 +46,7 @@ Built-in Commands:
   time <cmd>      - Measure command execution time
   watch [-n s] cmd - Repeat command every N seconds
   kill [-9] pid   - Kill a process by PID or %jobid
+  kill [-9] -p n  - Kill process(es) listening on TCP port n
   killall [-9] n  - Kill all processes by name
   tee [-a] <file> - Write stdin to file(s) and stdout
   ln [-s] t link  - Create hard or symbolic link
