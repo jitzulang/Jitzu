@@ -28,11 +28,7 @@ public abstract class CommandBase : IBuiltinCommand
     /// </summary>
     protected string ExpandPath(string path)
     {
-        if (LabelManager is not null)
-            path = LabelManager.ExpandLabel(path);
-        if (path.StartsWith('~'))
-            path = Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[1..]);
-        return Path.GetFullPath(path);
+        return ShellPathResolver.ExpandPath(path, LabelManager);
     }
 
     /// <summary>

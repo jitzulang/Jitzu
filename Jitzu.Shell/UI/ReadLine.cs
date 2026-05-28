@@ -9,7 +9,12 @@ namespace Jitzu.Shell.UI;
 /// <summary>
 /// Custom readline implementation with history navigation and basic line editing.
 /// </summary>
-public class ReadLine(HistoryManager history, ThemeConfig theme, CompletionHandler? completionHandler = null, Func<string, bool>? predictionFilter = null)
+public class ReadLine(
+    HistoryManager history,
+    ThemeConfig theme,
+    CompletionHandler? completionHandler = null,
+    Func<string, bool>? predictionFilter = null,
+    Func<string, string?>? inlineHintProvider = null)
 {
     private static readonly SearchValues<char> BoundaryValues = SearchValues.Create("\\/ ");
 
@@ -87,6 +92,9 @@ public class ReadLine(HistoryManager history, ThemeConfig theme, CompletionHandl
     // Ghost text (inline dimmed suffix from top prediction)
     private string? _ghostText;
 
+    // Informational inline hint that is never inserted into the input buffer.
+    private string? _inlineHintText;
+
     // Unified dropdown (renders either predictions or completions)
     private List<string> _dropdownItems = [];
     private int _dropdownIndex = -1;
@@ -141,6 +149,7 @@ public class ReadLine(HistoryManager history, ThemeConfig theme, CompletionHandl
         _promptPlain = Markup.Remove(prompt);
         _predictions = [];
         _ghostText = null;
+        _inlineHintText = null;
         _dropdownItems = [];
         _dropdownIndex = -1;
         _dropdownWindowStart = 0;
@@ -456,9 +465,10 @@ public class ReadLine(HistoryManager history, ThemeConfig theme, CompletionHandl
                         break;
 
                     case ConsoleKey.Escape:
-                        if (_dropdownItems.Count > 0 || _ghostText != null)
+                        if (_dropdownItems.Count > 0 || _ghostText != null || _inlineHintText != null)
                         {
                             _ghostText = null;
+                            _inlineHintText = null;
                             DismissDropdown();
                             RedrawLine();
                         }
@@ -633,6 +643,7 @@ public class ReadLine(HistoryManager history, ThemeConfig theme, CompletionHandl
             ApplyCompletionAtIndex(_dropdownIndex);
             ClearCompletions();
             DismissDropdown();
+            UpdatePredictions();
             RedrawLine();
             return;
         }
@@ -652,6 +663,7 @@ public class ReadLine(HistoryManager history, ThemeConfig theme, CompletionHandl
         // Open completion suggestions dropdown
         // Dismiss any history predictions
         DismissDropdown();
+        _inlineHintText = null;
 
         if (_completions == null || _completions.Length == 0)
         {
@@ -668,6 +680,7 @@ public class ReadLine(HistoryManager history, ThemeConfig theme, CompletionHandl
                 // Single completion — apply immediately, no dropdown
                 InsertCompletion(_completions[0]);
                 ClearCompletions();
+                UpdatePredictions();
             }
             else
             {
@@ -714,7 +727,21 @@ public class ReadLine(HistoryManager history, ThemeConfig theme, CompletionHandl
         Console.Write(sb.WrittenSpan);
 
         var bufferWidth = Console.BufferWidth;
-        var (totalVisualRows, _) = CalculateVisualPosition(Markup.Remove(sb.WrittenSpan), bufferWidth);
+
+        var suffixText = "";
+        if (_ghostText != null && _selectionStart == null && !_dropdownIsCompletions)
+        {
+            suffixText = _ghostText;
+            Console.Write($"{theme["prediction.text"]}{suffixText}{ThemeConfig.Reset}");
+        }
+        else if (_inlineHintText != null && _selectionStart == null && !_dropdownIsCompletions)
+        {
+            suffixText = _inlineHintText;
+            Console.Write($"{theme["prediction.text"]}{suffixText}{ThemeConfig.Reset}");
+        }
+
+        var visibleText = Markup.Remove(sb.WrittenSpan).ToString() + suffixText;
+        var (totalVisualRows, _) = CalculateVisualPosition(visibleText, bufferWidth);
 
         // Detect auto-scroll: if the cursor ended up lower than expected, the console scrolled
         var expectedEndRow = _promptRow + totalVisualRows;
@@ -729,14 +756,6 @@ public class ReadLine(HistoryManager history, ThemeConfig theme, CompletionHandl
         var (promptRows, promptCol) = CalculateVisualPosition(_promptPlain, bufferWidth);
         _bufferRow = _promptRow + promptRows;
         _bufferColumn = promptCol;
-
-        // Render ghost text (inline dimmed suffix from top prediction or selected dropdown item)
-        var ghostLen = 0;
-        if (_ghostText != null && _selectionStart == null && !_dropdownIsCompletions)
-        {
-            Console.Write($"{theme["prediction.text"]}{_ghostText}{ThemeConfig.Reset}");
-            ghostLen = _ghostText.Length;
-        }
 
         // Clear remainder of current line
         if (Console.BufferWidth - Console.CursorLeft is var remainder and > 0)
@@ -940,10 +959,23 @@ public class ReadLine(HistoryManager history, ThemeConfig theme, CompletionHandl
         _dropdownIndex = -1;
 
         _ghostText = null;
+        UpdateInlineHint();
 
         // Populate dropdown with predictions
         _dropdownItems = _predictions;
         _dropdownIsCompletions = false;
+    }
+
+    private void UpdateInlineHint()
+    {
+        if (inlineHintProvider == null)
+        {
+            _inlineHintText = null;
+            return;
+        }
+
+        var input = new string(CollectionsMarshal.AsSpan(_buffer));
+        _inlineHintText = inlineHintProvider(input);
     }
 
     /// <summary>
@@ -978,6 +1010,7 @@ public class ReadLine(HistoryManager history, ThemeConfig theme, CompletionHandl
         ClearDropdownLines();
         _predictions = [];
         _ghostText = null;
+        _inlineHintText = null;
         _dropdownItems = [];
         _dropdownIndex = -1;
         _dropdownWindowStart = 0;
