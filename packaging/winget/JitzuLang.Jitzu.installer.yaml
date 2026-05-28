@@ -1,5 +1,5 @@
 PackageIdentifier: JitzuLang.Jitzu
-PackageVersion: 0.1.32
+PackageVersion: 0.1.33
 InstallerType: zip
 NestedInstallerType: portable
 NestedInstallerFiles:
@@ -7,7 +7,7 @@ NestedInstallerFiles:
     PortableCommandAlias: jz
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/jitzulang/jitzu/releases/download/v0.1.32/jitzu-0.1.32-win-x64.zip
-    InstallerSha256: 484cf1d7c3647a785baee47fdc0645f98ceba0073eaa24c058577cc936b38c42
+    InstallerUrl: https://github.com/jitzulang/jitzu/releases/download/v0.1.33/jitzu-0.1.33-win-x64.zip
+    InstallerSha256: 447b2574efa768eb4ba81a535cd387aa3ea464bb4ef7de97fdf25d22d5ae9ec9
 ManifestType: installer
 ManifestVersion: 1.9.0
