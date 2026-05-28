@@ -84,6 +84,28 @@ A default configuration is written automatically on first launch. All values are
 Edit any value and restart the shell to apply changes. Malformed entries are silently
 ignored and fall back to defaults.
 
+## Windows Terminal Tabs
+
+Jitzu reports the current working directory to Windows Terminal using its supported
+`OSC 9;9` integration sequence. It also sets the tab title with the standard `OSC 2`
+sequence so the active tab can identify the current directory.
+
+Windows Terminal does not support dynamically changing the active tab color through
+ANSI or OSC escape sequences. Jitzu therefore does not emit iTerm2-only tab color
+sequences such as `OSC 6`, because Windows Terminal would ignore them.
+
+For tab colors in Windows Terminal, use static profile or launch-time configuration:
+
+<CodeBlock language="json" code={`{
+  "profiles": {
+    "defaults": {
+      "tabColor": "#87af87"
+    }
+  }
+}`} />
+
+<CodeBlock language="shell" code={`wt new-tab --tabColor "#87af87"`} />
+
 ## Startup Configuration
 
 The file `~/.jitzu/config.jz` is executed automatically when the shell starts,

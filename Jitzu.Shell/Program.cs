@@ -268,20 +268,21 @@ static async Task RunReplAsync(JitzuOptions options)
             }
             else
             {
-                TerminalIntegration.ReportCurrentDirectory();
-                Console.Write("\e[?25l"); // hide cursor during prompt build + render
-
-                // Notify about completed background jobs
-                var jobNotice = strategy.CheckCompletedJobs();
-                if (jobNotice is not null)
-                    Console.WriteLine(jobNotice);
-
                 var dir = Environment.CurrentDirectory.Replace(userProfilePath, "~");
 
                 // Trims path to root of Git repository
                 var gitRepoRoot = gitCache.FindGitRepoFolder(Environment.CurrentDirectory);
                 if (gitRepoRoot is not null)
                     dir = dir.Replace(gitRepoRoot.FullName, gitRepoRoot.Name);
+
+                TerminalIntegration.ReportCurrentDirectory();
+                TerminalIntegration.SetTitle(dir);
+                Console.Write("\e[?25l"); // hide cursor during prompt build + render
+
+                // Notify about completed background jobs
+                var jobNotice = strategy.CheckCompletedJobs();
+                if (jobNotice is not null)
+                    Console.WriteLine(jobNotice);
 
                 var branchSuffix = "";
                 if (gitRepoRoot is not null)
