@@ -77,6 +77,7 @@ public class BuiltinCommands
         var lnCommand = new LnCommand(_context);
         var statCommand = new StatCommand(_context);
         var chmodCommand = new ChmodCommand(_context);
+        var unblockCommand = new UnblockCommand(_context);
         var whoamiCommand = new WhoamiCommand(_context);
         var whoCommand = new WhoCommand(_context);
         var hostnameCommand = new HostnameCommand(_context);
@@ -157,6 +158,7 @@ public class BuiltinCommands
             ["ln"] = lnCommand.ExecuteAsync,
             ["stat"] = statCommand.ExecuteAsync,
             ["chmod"] = chmodCommand.ExecuteAsync,
+            ["unblock"] = unblockCommand.ExecuteAsync,
             ["whoami"] = whoamiCommand.ExecuteAsync,
             ["who"] = whoCommand.ExecuteAsync,
             ["hostname"] = hostnameCommand.ExecuteAsync,
