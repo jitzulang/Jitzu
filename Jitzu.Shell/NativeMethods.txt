@@ -2,3 +2,13 @@ GetStdHandle
 GetConsoleMode
 SetConsoleMode
 CONSOLE_MODE
+OpenProcess
+DuplicateHandle
+GetCurrentProcess
+CloseHandle
+GetFileType
+GetFinalPathNameByHandle
+RmStartSession
+RmEndSession
+RmRegisterResources
+RmGetList

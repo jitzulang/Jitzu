@@ -87,6 +87,26 @@ public class WhoCommandTests : IDisposable
     }
 
     [Test]
+    public async Task Who_Directory_UsesBatchLockLookup()
+    {
+        for (var i = 0; i < 50; i++)
+            await File.WriteAllTextAsync(Path.Combine(_tempDir, $"free-{i}.txt"), "hello");
+
+        var inspector = new CountingFileLockInspector();
+        var theme = ThemeConfig.CreateDefault();
+        var context = new CommandContext(new ShellSession(), theme);
+        var cmd = new WhoCommand(context, inspector);
+
+        var result = await cmd.ExecuteAsync(new[] { _tempDir }.AsMemory());
+
+        result.Type.ShouldBe(ResultType.OsCommand);
+        result.Output!.ShouldContain("50 file(s) checked");
+        inspector.FileLookupCount.ShouldBe(0);
+        inspector.BatchLookupCount.ShouldBe(1);
+        inspector.LastBatchPathCount.ShouldBe(50);
+    }
+
+    [Test]
     public async Task Who_Directory_ReportsDeleteBlockingAttributes()
     {
         var subDir = Path.Combine(_tempDir, ".git", "objects");
@@ -140,5 +160,25 @@ public class WhoCommandTests : IDisposable
         result.Output!.ShouldContain("nested");
         result.Output!.ShouldContain("locked.txt");
         result.Output!.ShouldContain(Environment.ProcessId.ToString());
+    }
+
+    private sealed class CountingFileLockInspector : IFileLockInspector
+    {
+        public int FileLookupCount { get; private set; }
+        public int BatchLookupCount { get; private set; }
+        public int LastBatchPathCount { get; private set; }
+
+        public Task<List<(int Pid, string Name)>> GetProcessesLockingFileAsync(string path)
+        {
+            FileLookupCount++;
+            return Task.FromResult(new List<(int Pid, string Name)>());
+        }
+
+        public Task<List<(string Path, List<(int Pid, string Name)> Holders)>> FindLockedFilesAsync(IReadOnlyList<string> paths)
+        {
+            BatchLookupCount++;
+            LastBatchPathCount = paths.Count;
+            return Task.FromResult(new List<(string Path, List<(int Pid, string Name)> Holders)>());
+        }
     }
 }

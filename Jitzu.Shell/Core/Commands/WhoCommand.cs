@@ -9,7 +9,14 @@ namespace Jitzu.Shell.Core.Commands;
 /// </summary>
 public class WhoCommand : CommandBase
 {
-    public WhoCommand(CommandContext context) : base(context) { }
+    private readonly IFileLockInspector _fileLockInspector;
+
+    public WhoCommand(CommandContext context) : this(context, new PlatformFileLockInspector()) { }
+
+    internal WhoCommand(CommandContext context, IFileLockInspector fileLockInspector) : base(context)
+    {
+        _fileLockInspector = fileLockInspector;
+    }
 
     public override async Task<ShellResult> ExecuteAsync(ReadOnlyMemory<string> args)
     {
@@ -87,7 +94,7 @@ public class WhoCommand : CommandBase
     {
         try
         {
-            var holders = await GetProcessesLockingFileAsync(path);
+            var holders = await _fileLockInspector.GetProcessesLockingFileAsync(path);
 
             if (holders.Count == 0)
                 return new ShellResult(ResultType.OsCommand, $"No processes hold a lock on '{path}'.", null);
@@ -112,24 +119,21 @@ public class WhoCommand : CommandBase
     {
         try
         {
-            var lockedFiles = new List<(string Path, List<(int Pid, string Name)> Holders)>();
             var protectedEntries = new List<(string Path, FileAttributes Attributes)>();
-            var checkedFiles = 0;
+            var files = new List<string>();
 
             foreach (var entry in EnumerateFileSystemEntriesSafe(path))
             {
-                var attributes = GetAttributesOrDefault(entry);
+                var attributes = entry.Attributes;
                 if ((attributes & (FileAttributes.ReadOnly | FileAttributes.System)) != 0)
-                    protectedEntries.Add((entry, attributes));
+                    protectedEntries.Add((entry.Path, attributes));
 
-                if (!Directory.Exists(entry))
-                {
-                    checkedFiles++;
-                    var holders = await GetProcessesLockingFileAsync(entry);
-                    if (holders.Count > 0)
-                        lockedFiles.Add((entry, holders));
-                }
+                if (!entry.IsDirectory)
+                    files.Add(entry.Path);
             }
+
+            var lockedFiles = await _fileLockInspector.FindLockedFilesAsync(files);
+            var checkedFiles = files.Count;
 
             if (lockedFiles.Count == 0 && protectedEntries.Count == 0)
                 return new ShellResult(ResultType.OsCommand,
@@ -169,46 +173,67 @@ public class WhoCommand : CommandBase
         }
     }
 
-    private static async Task<List<(int Pid, string Name)>> GetProcessesLockingFileAsync(string path)
+    private sealed class PlatformFileLockInspector : IFileLockInspector
     {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            return WhoWindowsLocks.GetProcessesLockingFile(path);
+        public async Task<List<(int Pid, string Name)>> GetProcessesLockingFileAsync(string path)
+        {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                return WhoWindowsLocks.GetProcessesLockingFile(path);
 
-        return await GetProcessesLockingFileUnixAsync(path);
+            return await GetProcessesLockingFileUnixAsync(path);
+        }
+
+        public async Task<List<(string Path, List<(int Pid, string Name)> Holders)>> FindLockedFilesAsync(IReadOnlyList<string> paths)
+        {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                if (WhoWindowsHandles.TryGetLockedFiles(paths, out var handleLockedFiles))
+                    return handleLockedFiles;
+
+                return WhoWindowsLocks.GetLockedFiles(paths);
+            }
+
+            var lockedFiles = new List<(string Path, List<(int Pid, string Name)> Holders)>();
+            foreach (var path in paths)
+            {
+                var holders = await GetProcessesLockingFileAsync(path);
+                if (holders.Count > 0)
+                    lockedFiles.Add((path, holders));
+            }
+
+            return lockedFiles;
+        }
     }
 
-    private static IEnumerable<string> EnumerateFileSystemEntriesSafe(string path)
+    private static IEnumerable<(string Path, FileAttributes Attributes, bool IsDirectory)> EnumerateFileSystemEntriesSafe(string path)
     {
         var pending = new Stack<string>();
         pending.Push(path);
+        var options = new EnumerationOptions
+        {
+            AttributesToSkip = 0,
+            IgnoreInaccessible = true,
+            ReturnSpecialDirectories = false
+        };
 
         while (pending.Count > 0)
         {
             var current = pending.Pop();
 
-            IEnumerable<string> files;
-            try { files = Directory.EnumerateFiles(current).ToArray(); }
-            catch { files = Array.Empty<string>(); }
+            IEnumerable<FileSystemInfo> entries;
+            try { entries = new DirectoryInfo(current).EnumerateFileSystemInfos("*", options).ToArray(); }
+            catch { entries = Array.Empty<FileSystemInfo>(); }
 
-            foreach (var file in files)
-                yield return file;
-
-            IEnumerable<string> directories;
-            try { directories = Directory.EnumerateDirectories(current).ToArray(); }
-            catch { directories = Array.Empty<string>(); }
-
-            foreach (var directory in directories)
+            foreach (var entry in entries)
             {
-                yield return directory;
-                pending.Push(directory);
+                var attributes = entry.Attributes;
+                var isDirectory = (attributes & FileAttributes.Directory) != 0;
+                yield return (entry.FullName, attributes, isDirectory);
+
+                if (isDirectory)
+                    pending.Push(entry.FullName);
             }
         }
-    }
-
-    private static FileAttributes GetAttributesOrDefault(string path)
-    {
-        try { return File.GetAttributes(path); }
-        catch { return default; }
     }
 
     private static string FormatAttributes(FileAttributes attributes)
@@ -299,4 +324,11 @@ public class WhoCommand : CommandBase
 
         return result;
     }
+}
+
+internal interface IFileLockInspector
+{
+    Task<List<(int Pid, string Name)>> GetProcessesLockingFileAsync(string path);
+
+    Task<List<(string Path, List<(int Pid, string Name)> Holders)>> FindLockedFilesAsync(IReadOnlyList<string> paths);
 }
