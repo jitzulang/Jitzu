@@ -125,4 +125,109 @@ public class HistoryManagerPredictionFilterTests
             Directory.Delete(tempDir, true);
         }
     }
+
+    [Test]
+    public async Task GetPredictions_CdQueryFindsAbsoluteHistoryPathAndMakesItRelative()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"jz_test_{Guid.NewGuid():N}");
+        var currentDir = Path.Combine(tempDir, "candc");
+        var targetDir = Path.Combine(tempDir, "personal", "Languages", "Jitzu");
+        Directory.CreateDirectory(currentDir);
+        Directory.CreateDirectory(targetDir);
+
+        try
+        {
+            var manager = await CreateWithHistory($"cd {targetDir}");
+
+            var predictions = manager.GetPredictions("cd Jitzu", 5,
+                p => HistoryPredictionFilter.IsValid(p, currentDir), currentDir);
+
+            predictions.ShouldContain($"cd {Path.GetRelativePath(currentDir, targetDir)}");
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Test]
+    public async Task GetPredictions_CdPathSearchIsCaseInsensitive()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"jz_test_{Guid.NewGuid():N}");
+        var currentDir = Path.Combine(tempDir, "current");
+        var targetDir = Path.Combine(tempDir, "Jitzu");
+        Directory.CreateDirectory(currentDir);
+        Directory.CreateDirectory(targetDir);
+
+        try
+        {
+            var manager = await CreateWithHistory($"cd {targetDir}");
+
+            var predictions = manager.GetPredictions("cd jitzu", 5, workingDirectory: currentDir);
+
+            predictions.ShouldContain($"cd {Path.GetRelativePath(currentDir, targetDir)}");
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Test]
+    public async Task GetPredictions_CdQueryResolvesLabelHistoryPath()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"jz_test_{Guid.NewGuid():N}");
+        var currentDir = Path.Combine(tempDir, "current");
+        var targetDir = Path.Combine(tempDir, "personal", "Languages", "Jitzu");
+        Directory.CreateDirectory(currentDir);
+        Directory.CreateDirectory(targetDir);
+
+        try
+        {
+            var manager = await CreateWithHistory("cd git:personal\\Languages\\Jitzu\\");
+
+            var predictions = manager.GetPredictions("cd Jitzu", 5, workingDirectory: currentDir,
+                pathResolver: _ => targetDir);
+
+            predictions.ShouldContain($"cd {Path.GetRelativePath(currentDir, targetDir)}");
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Test]
+    public async Task GetPredictions_DeduplicatesCdCommandsByResolvedTarget()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"jz_test_{Guid.NewGuid():N}");
+        var currentDir = Path.Combine(tempDir, "current");
+        var targetDir = Path.Combine(tempDir, "git");
+        Directory.CreateDirectory(currentDir);
+        Directory.CreateDirectory(targetDir);
+
+        try
+        {
+            var relativePath = Path.GetRelativePath(currentDir, targetDir);
+            var manager = await CreateWithHistory(
+                $"cd {targetDir}",
+                $"cd {relativePath}",
+                "cd git:"
+            );
+
+            string Resolve(string path) => path == "git:"
+                ? targetDir
+                : Path.GetFullPath(path, currentDir);
+
+            var predictions = manager.GetPredictions("cd ", 5, workingDirectory: currentDir,
+                pathResolver: Resolve);
+
+            predictions.Count.ShouldBe(1);
+            predictions[0].ShouldBe("cd git:");
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
 }

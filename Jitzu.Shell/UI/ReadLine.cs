@@ -14,7 +14,8 @@ public class ReadLine(
     ThemeConfig theme,
     CompletionHandler? completionHandler = null,
     Func<string, bool>? predictionFilter = null,
-    Func<string, string?>? inlineHintProvider = null)
+    Func<string, string?>? inlineHintProvider = null,
+    Func<string, string>? historyPathResolver = null)
 {
     private static readonly SearchValues<char> BoundaryValues = SearchValues.Create("\\/ ");
 
@@ -649,12 +650,9 @@ public class ReadLine(
         }
 
         // Accept selected history prediction
-        if (!_dropdownIsCompletions && _dropdownIndex >= 0 && _ghostText != null)
+        if (!_dropdownIsCompletions && _dropdownIndex >= 0)
         {
-            _buffer.AddRange(_ghostText);
-            _cursorPos = _buffer.Count;
-            _ghostText = null;
-            DismissDropdown();
+            AcceptPrediction();
             UpdatePredictions();
             RedrawLine();
             return;
@@ -955,7 +953,8 @@ public class ReadLine(
         if (_dropdownIsCompletions)
             return;
 
-        _predictions = history.GetPredictions(CollectionsMarshal.AsSpan(_buffer), MaxPredictions, predictionFilter);
+        _predictions = history.GetPredictions(CollectionsMarshal.AsSpan(_buffer), MaxPredictions, predictionFilter,
+            Directory.GetCurrentDirectory(), historyPathResolver);
         _dropdownIndex = -1;
 
         _ghostText = null;
@@ -999,7 +998,8 @@ public class ReadLine(
         var selectedItem = _dropdownItems[_dropdownIndex];
 
         // Extract suffix (what comes after current input)
-        if (selectedItem.Length > bufferLength)
+        if (selectedItem.AsSpan().StartsWith(CollectionsMarshal.AsSpan(_buffer), StringComparison.OrdinalIgnoreCase)
+            && selectedItem.Length > bufferLength)
             _ghostText = selectedItem[bufferLength..];
         else
             _ghostText = null;

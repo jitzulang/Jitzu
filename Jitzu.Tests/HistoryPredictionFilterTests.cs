@@ -6,6 +6,23 @@ namespace Jitzu.Tests;
 public class HistoryPredictionFilterTests
 {
     [Test]
+    public void IsValid_QuotedRelativePath_ResolvesWithoutQuotes()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"jz_test_{Guid.NewGuid():N}");
+        var targetDir = Path.Combine(tempDir, "my folder");
+        Directory.CreateDirectory(targetDir);
+
+        try
+        {
+            HistoryPredictionFilter.IsValid("cd \"my folder\"", tempDir).ShouldBeTrue();
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Test]
     public void NonCdCommands_AlwaysValid()
     {
         HistoryPredictionFilter.IsValid("ls -la", "/nonexistent").ShouldBeTrue();

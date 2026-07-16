@@ -205,7 +205,8 @@ static async Task RunReplAsync(JitzuOptions options)
     await aliasManager.InitialiseAsync();
     var readLine = new ReadLine(history, theme, completionManager.GetCompletions,
         prediction => HistoryPredictionFilter.IsValid(prediction, Directory.GetCurrentDirectory()),
-        input => CdPathHint.GetHint(input, labelManager, Directory.GetCurrentDirectory()));
+        input => CdPathHint.GetHint(input, labelManager, Directory.GetCurrentDirectory()),
+        path => ShellPathResolver.ExpandPath(path, labelManager, Directory.GetCurrentDirectory()));
 
     // Load config file (~/.jitzu/config.jz) like .bashrc
     var configPath = Path.Combine(userProfilePath, ".jitzu", "config.jz");

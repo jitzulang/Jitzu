@@ -67,11 +67,18 @@ public class HistoryManager
         return -1;
     }
 
-    public List<string> GetPredictions(ReadOnlySpan<char> prefix, int maxCount, Func<string, bool>? filter = null)
+    public List<string> GetPredictions(ReadOnlySpan<char> prefix, int maxCount, Func<string, bool>? filter = null,
+        string? workingDirectory = null, Func<string, string>? pathResolver = null)
     {
         if (prefix.IsEmpty) return [];
 
         var results = new List<string>(maxCount);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenCdTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var cdQuery = "";
+        var findCdPaths = workingDirectory is not null
+            && CdPathHint.TryGetCdArgument(prefix, out cdQuery)
+            && cdQuery.Length > 0;
 
         for (var i = _history.Count - 1; i >= 0 && results.Count < maxCount; i--)
         {
@@ -79,11 +86,52 @@ public class HistoryManager
             if (entry.AsSpan().StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
                 && !entry.AsSpan().Equals(prefix, StringComparison.OrdinalIgnoreCase)
                 && !IgnoredCommands.Contains(entry)
-                && (filter is null || filter(entry)))
+                && (filter is null || filter(entry))
+                && IsNewPrediction(entry, workingDirectory, pathResolver, seen, seenCdTargets))
                 results.Add(entry);
+
+            if (findCdPaths && results.Count < maxCount
+                && TryCreateCdPathPrediction(entry, cdQuery, workingDirectory!, pathResolver, out var pathPrediction)
+                && (filter is null || filter(pathPrediction))
+                && IsNewPrediction(pathPrediction, workingDirectory, pathResolver, seen, seenCdTargets))
+                results.Add(pathPrediction);
         }
 
         return results;
+    }
+
+    private static bool IsNewPrediction(string prediction, string? workingDirectory, Func<string, string>? pathResolver,
+        HashSet<string> seen, HashSet<string> seenCdTargets)
+    {
+        if (!seen.Add(prediction))
+            return false;
+
+        if (workingDirectory is null || !CdPathHint.TryGetCdArgument(prediction, out var path))
+            return true;
+
+        var resolvedPath = pathResolver?.Invoke(path) ?? Path.GetFullPath(path, workingDirectory);
+        return seenCdTargets.Add(Path.TrimEndingDirectorySeparator(Path.GetFullPath(resolvedPath)));
+    }
+
+    private static bool TryCreateCdPathPrediction(string historyEntry, string query, string workingDirectory,
+        Func<string, string>? pathResolver, out string prediction)
+    {
+        prediction = "";
+
+        if (!CdPathHint.TryGetCdArgument(historyEntry, out var historicalPath)
+            || !historicalPath.Contains(query, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var resolvedPath = pathResolver?.Invoke(historicalPath) ?? historicalPath;
+        if (!Path.IsPathFullyQualified(resolvedPath) || !Directory.Exists(resolvedPath))
+            return false;
+
+        var displayPath = Path.GetRelativePath(workingDirectory, Path.GetFullPath(resolvedPath));
+        if (displayPath.Any(char.IsWhiteSpace))
+            displayPath = $"\"{displayPath}\"";
+
+        prediction = $"cd {displayPath}";
+        return true;
     }
 
     public async Task RemoveAsync(string entry)

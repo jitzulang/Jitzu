@@ -13,10 +13,10 @@ public static class HistoryPredictionFilter
     /// </summary>
     public static bool IsValid(ReadOnlySpan<char> prediction, ReadOnlySpan<char> workingDirectory)
     {
-        if (!prediction.StartsWith("cd ", StringComparison.OrdinalIgnoreCase))
+        if (!CdPathHint.TryGetCdArgument(prediction, out var cdArgument))
             return true;
 
-        var argument = prediction[3..].Trim();
+        var argument = cdArgument.AsSpan();
 
         if (argument.IsEmpty)
             return true;
