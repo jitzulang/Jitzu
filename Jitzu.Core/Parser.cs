@@ -902,7 +902,7 @@ public ref struct Parser(ReadOnlySpan<Token> tokens)
             { } other => throw new Exception("Expected single identifier, got " + ExpressionFormatter.Format(other))
         };
 
-        var parameters = ParseFunctionParameters();
+        var parameters = ParseFunctionParameters(identifier.Name);
         var returnType = ParseFunctionReturnType();
         var body = ParseBlockBodyExpression();
 
@@ -1069,7 +1069,7 @@ public ref struct Parser(ReadOnlySpan<Token> tokens)
 
                     MoveNext();
                     var funName = ParseIdentifierLiteral();
-                    var parameters = ParseFunctionParameters();
+                    var parameters = ParseFunctionParameters(funName.Name);
                     var returnType = ParseFunctionReturnType();
 
                     functions.Add(
@@ -1442,7 +1442,7 @@ public ref struct Parser(ReadOnlySpan<Token> tokens)
         };
     }
 
-    private FunctionParametersExpression ParseFunctionParameters()
+    private FunctionParametersExpression ParseFunctionParameters(string functionName)
     {
         var openParen = ExpectAndConsume('(');
         var builder = ImmutableArray.CreateBuilder<FunctionParameterExpression>();
@@ -1466,7 +1466,11 @@ public ref struct Parser(ReadOnlySpan<Token> tokens)
                 continue;
             }
 
-            ExpectAndConsume(':');
+            if (!TryConsume(':'))
+                throw new MissingParameterTypeAnnotationException(
+                    nameIdentifier.Span,
+                    functionName,
+                    nameIdentifier.Value);
 
             var type = ParseTypeAnnotation();
 
@@ -1713,3 +1717,12 @@ public class UnexpectedSyntaxException(
     ReadOnlySpan<char> expected,
     ReadOnlySpan<char> received
 ) : JitzuException(location, $"S002: Syntax Error - Expected {expected} but got {received}");
+
+public class MissingParameterTypeAnnotationException(
+    SourceSpan location,
+    string functionName,
+    string parameterName
+) : JitzuException(
+    location,
+    $"S002: Syntax Error - Function parameter '{parameterName}' requires a type annotation. " +
+    $"Example: fun {functionName}({parameterName}: Int) {{ ... }}");
