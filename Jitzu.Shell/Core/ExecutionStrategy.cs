@@ -16,7 +16,11 @@ namespace Jitzu.Shell.Core;
 /// </summary>
 public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, AliasManager? aliasManager = null, LabelManager? labelManager = null)
 {
-    private static readonly HashSet<string> PipeFunctions = ["first", "last", "nth", "grep", "print", "head", "tail", "sort", "uniq", "wc", "more", "less", "tee"];
+    private static readonly HashSet<string> PipeFunctions =
+    [
+        "first", "last", "nth", "grep", "print", "head", "tail", "sort", "uniq", "wc",
+        "sum", "avg", "min", "max", "count", "more", "less", "tee"
+    ];
 
     private readonly List<BackgroundJob> _jobs = [];
     private int _nextJobId = 1;
@@ -1551,7 +1555,13 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
                 linesOnly: args.Any(a => a is "-l" or "--lines"),
                 wordsOnly: args.Any(a => a is "-w" or "--words"),
                 charsOnly: args.Any(a => a is "-c" or "--chars"),
+                files: args.Any(a => a is "--files" or "--each-file"),
                 cancellationToken),
+            "sum" => StreamingPipeFunctions.SumAsync(stream, cancellationToken),
+            "avg" => StreamingPipeFunctions.AverageAsync(stream, cancellationToken),
+            "min" => StreamingPipeFunctions.MinAsync(stream, cancellationToken),
+            "max" => StreamingPipeFunctions.MaxAsync(stream, cancellationToken),
+            "count" => StreamingPipeFunctions.CountAsync(stream, cancellationToken),
             "print" => PrintStreamAsync(stream, cancellationToken),
             "tee" => StreamingPipeFunctions.TeeAsync(stream, args.Length > 0 ? args[0].ToString() : null, cancellationToken),
             "more" or "less" => PagerStreamAsync(stream, cancellationToken),

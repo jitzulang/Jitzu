@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -321,8 +322,31 @@ public static class StreamingPipeFunctions
         bool linesOnly = false,
         bool wordsOnly = false,
         bool charsOnly = false,
+        bool files = false,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        if (files)
+        {
+            if (wordsOnly || charsOnly)
+                throw new ArgumentException("wc --files supports line counts only");
+
+            await foreach (var line in stream.WithCancellation(cancellationToken))
+            {
+                var path = line.Trim();
+                if (!File.Exists(path))
+                    throw new FileNotFoundException($"wc: file from input stream was not found: {path}", path);
+
+                var fileLineCount = 0L;
+                using var reader = new StreamReader(path);
+                while (await reader.ReadLineAsync(cancellationToken) is not null)
+                    fileLineCount++;
+
+                yield return fileLineCount.ToString(CultureInfo.InvariantCulture);
+            }
+
+            yield break;
+        }
+
         var lineCount = 0;
         var wordCount = 0;
         var charCount = 0;
@@ -351,6 +375,85 @@ public static class StreamingPipeFunctions
             yield return string.Join('\t', parts);
         }
     }
+
+    public static async IAsyncEnumerable<string> SumAsync(
+        IAsyncEnumerable<string> stream,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var summary = await SummarizeNumbersAsync(stream, cancellationToken);
+        yield return FormatNumber(summary.Sum);
+    }
+
+    public static async IAsyncEnumerable<string> AverageAsync(
+        IAsyncEnumerable<string> stream,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var summary = await SummarizeNumbersAsync(stream, cancellationToken);
+        if (summary.Count == 0)
+            throw new InvalidOperationException("avg requires at least one number");
+
+        yield return FormatNumber(summary.Sum / summary.Count);
+    }
+
+    public static async IAsyncEnumerable<string> MinAsync(
+        IAsyncEnumerable<string> stream,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var summary = await SummarizeNumbersAsync(stream, cancellationToken);
+        if (summary.Count == 0)
+            throw new InvalidOperationException("min requires at least one number");
+
+        yield return FormatNumber(summary.Min);
+    }
+
+    public static async IAsyncEnumerable<string> MaxAsync(
+        IAsyncEnumerable<string> stream,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var summary = await SummarizeNumbersAsync(stream, cancellationToken);
+        if (summary.Count == 0)
+            throw new InvalidOperationException("max requires at least one number");
+
+        yield return FormatNumber(summary.Max);
+    }
+
+    public static async IAsyncEnumerable<string> CountAsync(
+        IAsyncEnumerable<string> stream,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var count = 0L;
+        await foreach (var _ in stream.WithCancellation(cancellationToken))
+            count++;
+
+        yield return count.ToString(CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<NumberSummary> SummarizeNumbersAsync(
+        IAsyncEnumerable<string> stream,
+        CancellationToken cancellationToken)
+    {
+        var count = 0L;
+        var sum = 0d;
+        var min = double.PositiveInfinity;
+        var max = double.NegativeInfinity;
+
+        await foreach (var line in stream.WithCancellation(cancellationToken))
+        {
+            if (!double.TryParse(line.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+                throw new FormatException($"Expected a number in the pipeline, got '{line}'");
+
+            count++;
+            sum += value;
+            min = Math.Min(min, value);
+            max = Math.Max(max, value);
+        }
+
+        return new NumberSummary(count, sum, min, max);
+    }
+
+    private static string FormatNumber(double value) => value.ToString("G", CultureInfo.InvariantCulture);
+
+    private readonly record struct NumberSummary(long Count, double Sum, double Min, double Max);
 
     /// <summary>
     /// Prints lines to console and passes them through.
