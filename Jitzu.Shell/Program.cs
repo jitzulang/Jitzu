@@ -218,6 +218,7 @@ static async Task RunReplAsync(JitzuOptions options)
     var configPath = Path.Combine(userProfilePath, ".jitzu", "config.jz");
     if (File.Exists(configPath))
     {
+        aliasManager.BeginSaveBatch();
         try
         {
             var configLines = await File.ReadAllLinesAsync(configPath);
@@ -230,6 +231,10 @@ static async Task RunReplAsync(JitzuOptions options)
         catch (Exception ex)
         {
             Console.WriteLine($"{theme["error"]}Error loading config: {ex.Message}{ThemeConfig.Reset}");
+        }
+        finally
+        {
+            await aliasManager.EndSaveBatchAsync();
         }
     }
 

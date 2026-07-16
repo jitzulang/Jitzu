@@ -32,8 +32,8 @@ public class AliasCommand : CommandBase
             ((value[0] == '"' && value[^1] == '"') || (value[0] == '\'' && value[^1] == '\'')))
             value = value[1..^1];
 
-        AliasManager.Set(name, value);
-        await AliasManager.SaveAsync();
+        if (AliasManager.Set(name, value))
+            await AliasManager.SaveAsync();
         return new ShellResult(ResultType.Jitzu, $"Alias set: {name} → {value}", null);
     }
 }
