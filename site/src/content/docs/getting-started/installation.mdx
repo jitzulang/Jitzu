@@ -15,9 +15,15 @@ Jitzu is distributed as a single standalone binary — `jz` — that serves as b
 
 ## Package Managers
 
+### Windows (WinGet)
+
+WinGet is included with current versions of Windows 10 and Windows 11.
+
+<CodeBlock language="powershell" code={`winget install --id JitzuLang.Jitzu --exact`} />
+
 ### Windows (Scoop)
 
-<CodeBlock language="bash" code={`scoop bucket add jitzu https://github.com/jitzulang/jitzu
+<CodeBlock language="powershell" code={`scoop bucket add jitzu https://github.com/jitzulang/jitzu
 scoop install jz`} />
 
 ## Self-Contained Binary
@@ -27,14 +33,23 @@ prerequisites. This is the easiest way to get started without a package manager.
 
 ### Windows
 
-Download `jitzu-win-x64.zip` from the [latest GitHub release](https://github.com/jitzulang/jitzu/releases/latest) and extract it. Add the extracted directory to your PATH, or move the binary to a directory already on your PATH.
+Download `jitzu-win-x64.zip` from the [latest GitHub release](https://github.com/jitzulang/jitzu/releases/latest). The following PowerShell commands extract it to a user-owned application directory and add that directory to your persistent user PATH without requiring administrator access.
 
-<CodeBlock language="bash" code={`# PowerShell
-Expand-Archive jitzu-win-x64.zip -DestinationPath C:\\tools\\jitzu
-$env:PATH += ";C:\\tools\\jitzu"
+<CodeBlock language="powershell" code={`$dest = Join-Path $env:LOCALAPPDATA "Programs\\Jitzu"
+New-Item -ItemType Directory -Force -Path $dest | Out-Null
+Expand-Archive .\\jitzu-win-x64.zip -DestinationPath $dest -Force
 
-# Or move to a directory already on PATH
-Move-Item jz.exe C:\\Windows\\`} />
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$pathEntries = @($userPath -split ";" | Where-Object { $_ })
+if ($pathEntries -notcontains $dest) {
+    [Environment]::SetEnvironmentVariable(
+        "Path",
+        ($pathEntries + $dest) -join ";",
+        "User"
+    )
+}`} />
+
+Restart your terminal after updating PATH, then run `jz --version` to verify the installation.
 
 ### macOS
 

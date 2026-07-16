@@ -24,6 +24,9 @@ Jitzu is a lightweight, expressive scripting language that runs on the .NET runt
 ### Package Managers
 
 ```sh
+# Windows (WinGet)
+winget install --id JitzuLang.Jitzu --exact
+
 # Windows (Scoop)
 scoop bucket add jitzu https://github.com/jitzulang/jitzu
 scoop install jz
