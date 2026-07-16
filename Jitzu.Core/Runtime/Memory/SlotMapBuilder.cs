@@ -62,6 +62,13 @@ public class SlotMapBuilder(SlotMapBuilder? parentBuilder, LocalKind localKind)
     }
 
     /// <summary>
+    /// Adds a name to the root/global slot map, even when called while binding a
+    /// function or lambda body. Runtime type objects live in global slots and must
+    /// never be allocated as uninitialised function locals.
+    /// </summary>
+    public Local AddGlobal(string name) => parentBuilder?.AddGlobal(name) ?? Add(name);
+
+    /// <summary>
     /// Try to find a local in the current function or enclosing functions.
     /// </summary>
     public bool TryGetLocal(string name, out Local local)

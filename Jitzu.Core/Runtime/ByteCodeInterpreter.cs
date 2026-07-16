@@ -625,6 +625,15 @@ public ref struct ByteCodeInterpreter
             case Type type:
             {
                 var ctorArgs = args.Select(arg => OptionBridge.UnwrapOption(arg.AsObject())).ToArray();
+                if (type.IsGenericTypeDefinition)
+                {
+                    var genericParameters = type.GetGenericArguments();
+                    if (genericParameters.Length != 1 || ctorArgs.Length == 0 || ctorArgs[0] is null)
+                        throw new InvalidOperationException(
+                            $"Cannot infer generic arguments for '{type.Name}' from this constructor call");
+
+                    type = type.MakeGenericType(ctorArgs[0]!.GetType());
+                }
                 _programStack.Push(Activator.CreateInstance(type, ctorArgs)!);
                 break;
             }
@@ -686,7 +695,7 @@ public ref struct ByteCodeInterpreter
             return false;
         }
 
-        returnValue = _programStack.Pop();
+        returnValue = CoerceDeclaredUnionReturn(_programStack.Pop(), _currentFunction.FunctionReturnType);
 
         if (_frameTop < 0)
             return true;
@@ -703,6 +712,24 @@ public ref struct ByteCodeInterpreter
 
         _programStack.Push(returnValue);
         return false;
+    }
+
+    private static Value CoerceDeclaredUnionReturn(Value returnValue, Type? declaredReturnType)
+    {
+        if (declaredReturnType is null
+            || !typeof(IUnion).IsAssignableFrom(declaredReturnType)
+            || returnValue.Kind is not ValueKind.Ref
+            || returnValue.Ref is IUnion)
+            return returnValue;
+
+        var value = returnValue.Ref;
+        var constructor = declaredReturnType.GetConstructors()
+            .FirstOrDefault(c => c.GetParameters() is [{ ParameterType: var parameterType }]
+                                 && parameterType.IsInstanceOfType(value));
+
+        return constructor is null
+            ? returnValue
+            : Value.FromRef(constructor.Invoke([value]));
     }
 
     private void Swap()

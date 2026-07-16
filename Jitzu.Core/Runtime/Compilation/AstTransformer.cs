@@ -269,7 +269,7 @@ public class AstTransformer(RuntimeProgram program)
         Type type,
         SlotMapBuilder slotMapBuilder)
     {
-        var local = slotMapBuilder.Add(type.Name);
+        var local = slotMapBuilder.AddGlobal(ident.Name);
         return TransformIdentifierToLocalGet(ident, local);
     }
 
