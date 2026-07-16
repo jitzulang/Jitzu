@@ -178,4 +178,4 @@ public static class BinaryExpressionEvaluator
 }
 
 public class OperationNotSupportedException(string op, Value left, Value? right) : Exception(
-    $"Operation {op} not supported for types '{ValueFormatter.Format(left)}' and '{ValueFormatter.Format(right)}'");
+    $"Operation {op} not supported for types '{ValueFormatter.FormatTypeName(left)}' and '{ValueFormatter.FormatTypeName(right)}'");
