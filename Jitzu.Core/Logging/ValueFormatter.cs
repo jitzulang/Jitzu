@@ -10,6 +10,26 @@ namespace Jitzu.Core.Logging;
 
 public static class ValueFormatter 
 {
+    public static string FormatTypeName(Value? value)
+    {
+        if (value is not { } v)
+            return "None";
+
+        return v.Kind switch
+        {
+            ValueKind.Null => "None",
+            ValueKind.Int => "Int",
+            ValueKind.Double => "Double",
+            ValueKind.Bool => "Bool",
+            ValueKind.Ref when v.Ref is string => "String",
+            ValueKind.Ref => TrimGenericArity(v.Ref.GetType().Name),
+            _ => v.Kind.ToString()
+        };
+    }
+
+    private static string TrimGenericArity(string name) =>
+        name.IndexOf('`') is var index and >= 0 ? name[..index] : name;
+
     public static string? Format(params object?[] objects)
     {
         switch (objects.Length)

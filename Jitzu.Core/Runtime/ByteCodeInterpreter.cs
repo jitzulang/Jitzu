@@ -376,17 +376,18 @@ public ref struct ByteCodeInterpreter
         }
         catch (Exception ex)
         {
-            Console.WriteLine("Error occured at IP: {0}", _ip);
-            Console.WriteLine("Stack:");
-            if (_programStack.StackPointer > -1)
+            if (_dumpStack)
             {
-                foreach (var item in _programStack.Stack[.._programStack.StackPointer])
-                    Console.WriteLine($"- {item}");
-            }
+                var output = GlobalFunctions.Output;
+                output.WriteLine("Error occurred at IP: {0}", _ip);
+                output.WriteLine("Stack:");
+                for (var i = 0; i <= _programStack.StackPointer; i++)
+                    output.WriteLine($"- {_programStack.Stack[i]}");
 
-            Console.WriteLine($"FrameTop={_frameTop}");
-            for (var i = 0; i <= _frameTop; i++)
-                Console.WriteLine($"[{i}] {_frames[i].UserFunction.ToString()} IP={_frames[i].IP}");
+                output.WriteLine($"FrameTop={_frameTop}");
+                for (var i = 0; i <= _frameTop; i++)
+                    output.WriteLine($"[{i}] {_frames[i].UserFunction} IP={_frames[i].IP}");
+            }
 
             var debugSpan = _currentFunction.Chunk.DebugSpans[lastIp];
             throw new JitzuException(debugSpan, ex.Message);
@@ -410,7 +411,7 @@ public ref struct ByteCodeInterpreter
                 sb.Append($"[{ValueFormatter.Format(_programStack.Peek(i))}]");
             }
 
-            Console.WriteLine($"{_ip:000}: {sb}");
+            GlobalFunctions.Output.WriteLine($"{_ip:000}: {sb}");
         }
         finally
         {
