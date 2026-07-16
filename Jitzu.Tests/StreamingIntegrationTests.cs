@@ -157,6 +157,29 @@ public class StreamingIntegrationTests
     }
 
     [Test]
+    public async Task FindFiles_WcEachFile_Average_ComputesAverageLineCount()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "jitzu_pipeline_avg_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(directory, "two.cs"), "one\ntwo\n");
+            await File.WriteAllTextAsync(Path.Combine(directory, "four.cs"), "one\ntwo\nthree\nfour\n");
+            await File.WriteAllTextAsync(Path.Combine(directory, "ignored.txt"), "one\n");
+
+            var output = await RunCommandAsync(
+                $"find \"{directory}\" -type f -ext .cs | wc -l --files | avg");
+
+            output.ShouldBe("3");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Test]
     public async Task StreamingPipeline_LargeDataset_HandlesEfficiently()
     {
         // This should complete quickly with streaming

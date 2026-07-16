@@ -58,7 +58,9 @@ c3d4e5f Refactor parser`} />
     <tr><td><code>tail -n N</code></td><td>Last N lines (default 10)</td></tr>
     <tr><td><code>sort [-r]</code></td><td>Sort lines alphabetically</td></tr>
     <tr><td><code>uniq</code></td><td>Remove consecutive duplicate lines</td></tr>
-    <tr><td><code>wc [-l/-w/-c]</code></td><td>Count lines/words/chars</td></tr>
+    <tr><td><code>{'wc [-l/-w/-c] [--files]'}</code></td><td>Count the stream, or emit a count for each input file</td></tr>
+    <tr><td><code>sum / avg / min / max</code></td><td>Aggregate a numeric stream</td></tr>
+    <tr><td><code>count</code></td><td>Count items in a stream</td></tr>
     <tr><td><code>tee [-a] file</code></td><td>Write to file and pass through</td></tr>
     <tr><td><code>more / less</code></td><td>View output in pager</td></tr>
     <tr><td><code>print</code></td><td>Print and pass through</td></tr>
@@ -79,6 +81,12 @@ a1b2c3d Fix login timeout
 c3d4e5f Fix parser edge case
 
 > ls *.cs | sort | tee filelist.txt`} />
+
+Map file paths to line counts with `wc --files`, then reduce the numeric stream. For example,
+this computes the average lines per C# file:
+
+<CodeBlock language="shell" code={`> find . -type f -ext .cs | wc -l --files | avg
+187.4`} />
 
 ## Builtin Pipes
 
