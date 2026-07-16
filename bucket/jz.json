@@ -3,7 +3,7 @@
   "architecture": {
     "64bit": {
       "url": "https://github.com/jitzulang/jitzu/releases/download/v0.1.36/jitzu-0.1.36-win-x64.zip",
-      "hash": "d37b3c548c3d710c86d00bc277cf328c96a160925900cf660a352d694d6a6ef4"
+      "hash": "4d72459e246ea8505702d2d6b1c1c3b53d51f7a803c75a289d3a0a8c9d77b5b5"
     }
   },
   "bin": "jz.exe",
