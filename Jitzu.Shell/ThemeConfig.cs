@@ -105,13 +105,59 @@ public sealed class ThemeConfig
     {
         try
         {
-            var json = await File.ReadAllTextAsync(ConfigPath);
-            using var doc = JsonDocument.Parse(json);
-            FlattenJson(doc.RootElement, "", colours);
+            var json = await File.ReadAllBytesAsync(ConfigPath);
+            ApplyUserOverrides(json, colours);
         }
         catch
         {
             // Malformed config — silently fall back to defaults
+        }
+    }
+
+    internal static void ApplyUserOverrides(ReadOnlySpan<byte> json, Dictionary<string, string> colours)
+    {
+        var reader = new Utf8JsonReader(json);
+        var path = new List<string>(4);
+        string? propertyName = null;
+
+        while (reader.Read())
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.PropertyName:
+                    propertyName = reader.GetString();
+                    break;
+
+                case JsonTokenType.StartObject when propertyName is not null:
+                    path.Add(propertyName);
+                    propertyName = null;
+                    break;
+
+                case JsonTokenType.EndObject:
+                    if (path.Count > 0)
+                        path.RemoveAt(path.Count - 1);
+                    propertyName = null;
+                    break;
+
+                case JsonTokenType.String when propertyName is not null:
+                    var hex = reader.GetString();
+                    if (hex is not null && hex.StartsWith('#') && hex.Length == 7)
+                    {
+                        var key = path.Count switch
+                        {
+                            0 => propertyName,
+                            1 => string.Concat(path[0], ".", propertyName),
+                            _ => string.Concat(string.Join('.', path), ".", propertyName)
+                        };
+                        colours[key] = HexToAnsi(hex, key.EndsWith(".bg"));
+                    }
+                    propertyName = null;
+                    break;
+
+                default:
+                    propertyName = null;
+                    break;
+            }
         }
     }
 
@@ -125,26 +171,6 @@ public sealed class ThemeConfig
         catch
         {
             // Non-critical — continue with in-memory defaults
-        }
-    }
-
-    private static void FlattenJson(JsonElement element, string prefix, Dictionary<string, string> target)
-    {
-        switch (element.ValueKind)
-        {
-            case JsonValueKind.Object:
-                foreach (var prop in element.EnumerateObject())
-                {
-                    var key = string.IsNullOrEmpty(prefix) ? prop.Name : $"{prefix}.{prop.Name}";
-                    FlattenJson(prop.Value, key, target);
-                }
-                break;
-
-            case JsonValueKind.String:
-                var hex = element.GetString();
-                if (hex is not null && hex.StartsWith('#') && hex.Length == 7)
-                    target[prefix] = HexToAnsi(hex, prefix.EndsWith(".bg"));
-                break;
         }
     }
 

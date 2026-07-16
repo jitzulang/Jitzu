@@ -170,10 +170,13 @@ static ScriptExpression ParseProgram(FileInfo entryPoint)
 
 static async Task ExecuteCommand(string command, bool persist)
 {
-    var theme = await ThemeConfig.LoadAsync();
-    var session = await ShellSession.CreateAsync();
+    var themeTask = ThemeConfig.LoadAsync();
+    var sessionTask = ShellSession.CreateAsync();
     var aliasManager = new AliasManager(persist);
-    await aliasManager.InitialiseAsync();
+    var aliasTask = aliasManager.InitialiseAsync();
+    await Task.WhenAll(themeTask, sessionTask, aliasTask);
+    var theme = await themeTask;
+    var session = await sessionTask;
     var labelManager = new LabelManager();
     var builtins = new BuiltinCommands(session, theme, aliasManager, labelManager);
     var strategy = new ExecutionStrategy(session, builtins, aliasManager, labelManager);
@@ -189,11 +192,16 @@ static async Task ExecuteCommand(string command, bool persist)
 static async Task RunReplAsync(JitzuOptions options)
 {
     // Initialize session and components
-    var theme = await ThemeConfig.LoadAsync();
-    var session = await ShellSession.CreateAsync();
     var persist = options.Persist;
     var history = new HistoryManager(persist);
     var aliasManager = new AliasManager(persist);
+    var themeTask = ThemeConfig.LoadAsync();
+    var sessionTask = ShellSession.CreateAsync();
+    var historyTask = history.InitialiseAsync();
+    var aliasTask = aliasManager.InitialiseAsync();
+    await Task.WhenAll(themeTask, sessionTask, historyTask, aliasTask);
+    var theme = await themeTask;
+    var session = await sessionTask;
     var labelManager = new LabelManager();
     var builtins = new BuiltinCommands(session, theme, aliasManager, labelManager, history);
     var strategy = new ExecutionStrategy(session, builtins, aliasManager, labelManager);
@@ -201,8 +209,6 @@ static async Task RunReplAsync(JitzuOptions options)
     var completionManager = new CompletionManager(session, builtins, labelManager);
     var userProfilePath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-    await history.InitialiseAsync();
-    await aliasManager.InitialiseAsync();
     var readLine = new ReadLine(history, theme, completionManager.GetCompletions,
         prediction => HistoryPredictionFilter.IsValid(prediction, Directory.GetCurrentDirectory()),
         input => CdPathHint.GetHint(input, labelManager, Directory.GetCurrentDirectory()),
@@ -291,7 +297,7 @@ static async Task RunReplAsync(JitzuOptions options)
                     var branch = gitCache.GetGitBranch(gitRepoRoot.FullName);
                     if (branch is not null)
                     {
-                        var status = await GetGitStatusAsync(gitRepoRoot.FullName);
+                        var status = gitCache.GetGitStatus(gitRepoRoot.FullName);
 
                         promptSb.Clear();
                         if (status.HasDirty) promptSb.Append($"{theme["git.dirty"]}*{ThemeConfig.Reset}");
@@ -479,95 +485,6 @@ static void CleanupOldBinary()
     catch
     {
         // Best effort — ignore errors
-    }
-}
-
-/// <summary>
-/// Gets git working tree status by running `git status --porcelain --branch`.
-/// Returns indicators for dirty, staged, untracked files and ahead/behind counts.
-/// </summary>
-static async Task<(bool HasStaged, bool HasDirty, bool HasUntracked, int Ahead, int Behind)> GetGitStatusAsync(string gitRepoPath)
-{
-    try
-    {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "git",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WorkingDirectory = gitRepoPath,
-        };
-        startInfo.ArgumentList.Add("status");
-        startInfo.ArgumentList.Add("--porcelain=v1");
-        startInfo.ArgumentList.Add("--branch");
-
-        using var process = Process.Start(startInfo);
-        if (process is null)
-            return default;
-
-        var outputTask = process.StandardOutput.ReadToEndAsync();
-        var errorTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        var output = await outputTask;
-        await errorTask;
-
-        if (process.ExitCode != 0)
-            return default;
-
-        var hasStaged = false;
-        var hasDirty = false;
-        var hasUntracked = false;
-        var ahead = 0;
-        var behind = 0;
-
-        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (line.StartsWith("##"))
-            {
-                // Parse: ## branch...origin/branch [ahead N, behind M]
-                var bracketStart = line.IndexOf('[');
-                if (bracketStart >= 0)
-                {
-                    var bracketEnd = line.IndexOf(']', bracketStart);
-                    if (bracketEnd >= 0)
-                    {
-                        var info = line[(bracketStart + 1)..bracketEnd];
-                        foreach (var part in info.Split(',', StringSplitOptions.TrimEntries))
-                        {
-                            if (part.StartsWith("ahead ") && int.TryParse(part.AsSpan()[6..], out var a))
-                                ahead = a;
-                            else if (part.StartsWith("behind ") && int.TryParse(part.AsSpan()[7..], out var b))
-                                behind = b;
-                        }
-                    }
-                }
-                continue;
-            }
-
-            if (line.Length < 2) continue;
-
-            if (line.StartsWith("??"))
-            {
-                hasUntracked = true;
-                continue;
-            }
-
-            // First column: staging area status
-            if (line[0] is not ' ' and not '?')
-                hasStaged = true;
-
-            // Second column: working tree status
-            if (line[1] is not ' ' and not '?')
-                hasDirty = true;
-        }
-
-        return (hasStaged, hasDirty, hasUntracked, ahead, behind);
-    }
-    catch
-    {
-        return default;
     }
 }
 

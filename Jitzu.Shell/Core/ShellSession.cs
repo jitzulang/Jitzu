@@ -15,24 +15,38 @@ public class ShellSession
     // Persistent compilation state
     private ProgramStack _stack = null!;
 
-    // NEW: persistent runtime assembly universe
-    private readonly ReplLoadContext _loadContext = new();
-    private readonly PackageResolver _resolver = new();
+    private readonly SemaphoreSlim _initializationLock = new(1, 1);
+    private RuntimeProgram? _program;
 
-    // Expose program for introspection (used by builtin commands)
-    public RuntimeProgram Program { get; private set; } = null!;
+    // Runtime-aware commands pay the initialization cost on first use. Keeping
+    // this lazy lets the prompt and native builtins start without scanning every
+    // loaded BCL assembly.
+    public RuntimeProgram Program => EnsureInitializedAsync().GetAwaiter().GetResult();
 
-    public static async Task<ShellSession> CreateAsync()
+    public static Task<ShellSession> CreateAsync() => Task.FromResult(new ShellSession());
+
+    private async Task<RuntimeProgram> EnsureInitializedAsync()
     {
-        var session = new ShellSession();
-        await session.Initialize();
-        return session;
+        if (_program is not null)
+            return _program;
+
+        await _initializationLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_program is null)
+                await Initialize().ConfigureAwait(false);
+            return _program!;
+        }
+        finally
+        {
+            _initializationLock.Release();
+        }
     }
 
     private async Task Initialize()
     {
         // Initialize with built-in types and functions
-        Program = await InitializeBaseProgram();
+        _program = await InitializeBaseProgram();
 
         // Create persistent stack and initialize with global functions and types
         _stack = new ProgramStack();
@@ -52,12 +66,13 @@ public class ShellSession
     private void InitializeGlobalStack()
     {
         // Initialize global slots with types and functions
-        foreach (var (name, index) in Program.GlobalSlotMap)
+        var program = _program!;
+        foreach (var (name, index) in program.GlobalSlotMap)
         {
-            if (Program.GlobalFunctions.TryGetValue(name, out var function))
+            if (program.GlobalFunctions.TryGetValue(name, out var function))
                 _stack.SetGlobal(index, Value.FromRef(function));
-            else if (Program.Types.TryGetValue(name, out var type) 
-                     || Program.SimpleTypeCache.TryGetValue(name, out type))
+            else if (program.Types.TryGetValue(name, out var type)
+                     || program.SimpleTypeCache.TryGetValue(name, out type))
                 _stack.SetGlobal(index, Value.FromRef(type));
         }
     }
@@ -70,6 +85,7 @@ public class ShellSession
     {
         try
         {
+            var program = await EnsureInitializedAsync().ConfigureAwait(false);
             // Parse the new input
             var newAst = Parser.Parse("<repl>", input);
             var scriptExpression = new ScriptExpression
@@ -78,20 +94,20 @@ public class ShellSession
                 Location = SourceSpan.Empty
             };
 
-            Program = await ProgramBuilder.PatchProgram(Program, scriptExpression);
+            _program = program = await ProgramBuilder.PatchProgram(program, scriptExpression);
 
             // Run semantic analysis (type resolution, function registration)
-            var analyser = new SemanticAnalyser(Program);
+            var analyser = new SemanticAnalyser(program);
             scriptExpression = analyser.AnalyseScript(scriptExpression);
 
             // Update global stack with new program state (types, functions, updated SlotMap)
             InitializeGlobalStack();
 
             // Extract and compile only the new expressions
-            var script = new ByteCodeCompiler(Program).Compile(scriptExpression.Body);
+            var script = new ByteCodeCompiler(program).Compile(scriptExpression.Body);
 
             // Execute using persistent stack to maintain global variables
-            var interpreter = new ByteCodeInterpreter(Program, script, _stack, false);
+            var interpreter = new ByteCodeInterpreter(program, script, _stack, false);
             var result = interpreter.Evaluate();
 
             return new ExecutionResult(true, result, null);
@@ -102,7 +118,12 @@ public class ShellSession
         }
     }
 
-    public async Task ResetAsync() => await Initialize();
+    public async Task ResetAsync()
+    {
+        await _initializationLock.WaitAsync().ConfigureAwait(false);
+        try { await Initialize().ConfigureAwait(false); }
+        finally { _initializationLock.Release(); }
+    }
 
     public List<Completion> GetCompletionSuggestions(string partial)
     {
