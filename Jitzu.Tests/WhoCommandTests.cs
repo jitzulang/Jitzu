@@ -124,6 +124,19 @@ public class WhoCommandTests : IDisposable
     }
 
     [Test]
+    public void Who_WindowsHandlePathComparison_IgnoresTrailingDirectorySeparator()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var withoutSeparator = Path.GetFullPath(_tempDir);
+        var withSeparator = withoutSeparator + Path.DirectorySeparatorChar;
+
+        WhoWindowsHandles.NormalizePathForComparison(withSeparator)
+            .ShouldBe(WhoWindowsHandles.NormalizePathForComparison(withoutSeparator));
+    }
+
+    [Test]
     public async Task Who_Directory_ReportsDeleteBlockingAttributes()
     {
         var subDir = Path.Combine(_tempDir, ".git", "objects");

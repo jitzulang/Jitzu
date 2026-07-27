@@ -68,7 +68,7 @@ internal static class WhoWindowsHandles
 
         var targetPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var path in paths)
-            targetPaths.Add(Path.GetFullPath(path));
+            targetPaths.Add(NormalizePathForComparison(path));
 
         var matches = new Dictionary<string, HashSet<int>>(StringComparer.OrdinalIgnoreCase);
         var buffer = IntPtr.Zero;
@@ -93,7 +93,7 @@ internal static class WhoWindowsHandles
         var processNames = new Dictionary<int, string>();
         foreach (var path in paths)
         {
-            var fullPath = Path.GetFullPath(path);
+            var fullPath = NormalizePathForComparison(path);
             if (!matches.TryGetValue(fullPath, out var pids))
                 continue;
 
@@ -201,7 +201,7 @@ internal static class WhoWindowsHandles
                         continue;
 
                     string path;
-                    try { path = NormalizePath(new string(pathBuffer, 0, (int)length)); }
+                    try { path = NormalizePathForComparison(new string(pathBuffer, 0, (int)length)); }
                     catch { continue; }
 
                     if (!targetPaths.Contains(path))
@@ -231,17 +231,17 @@ internal static class WhoWindowsHandles
         }
     }
 
-    private static string NormalizePath(string path)
+    internal static string NormalizePathForComparison(string path)
     {
+        const string extendedUncPrefix = @"\\?\UNC\";
         const string extendedPrefix = @"\\?\";
-        if (path.StartsWith(extendedPrefix, StringComparison.Ordinal))
+
+        if (path.StartsWith(extendedUncPrefix, StringComparison.OrdinalIgnoreCase))
+            path = @"\\" + path[extendedUncPrefix.Length..];
+        else if (path.StartsWith(extendedPrefix, StringComparison.Ordinal))
             path = path[extendedPrefix.Length..];
 
-        const string uncPrefix = @"UNC\";
-        if (path.StartsWith(uncPrefix, StringComparison.OrdinalIgnoreCase))
-            path = @"\" + path[uncPrefix.Length..];
-
-        return Path.GetFullPath(path);
+        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
     }
 
     private static string GetProcessName(int pid)
