@@ -102,6 +102,67 @@ public class UnblockCommandTests : IDisposable
         result.Output!.ShouldContain("No delete-blocking attributes found in 1 entry");
     }
 
+    [Test]
+    public async Task Unblock_AttributesOnly_ReportsHolderWithoutTerminatingIt()
+    {
+        var file = Path.Combine(_tempDir, "locked.txt");
+        await File.WriteAllTextAsync(file, "data");
+        var inspector = new StubFileLockInspector(file, 4242, "agent-brain");
+        var terminated = new List<int>();
+        var context = new CommandContext(new ShellSession(), ThemeConfig.CreateDefault());
+        var cmd = new UnblockCommand(context, inspector, terminated.Add);
+
+        var result = await cmd.ExecuteAsync(new[] { "--attributes-only", file }.AsMemory());
+
+        result.Type.ShouldBe(ResultType.OsCommand);
+        result.Output!.ShouldContain("Process locks remain");
+        result.Output!.ShouldContain("4242");
+        result.Output!.ShouldContain("agent-brain");
+        result.Output!.ShouldContain("without --attributes-only");
+        terminated.ShouldBeEmpty();
+    }
+
+    [Test]
+    public async Task Unblock_TerminatesEachLockingProcessOnceByDefault()
+    {
+        var nested = Path.Combine(_tempDir, "nested");
+        Directory.CreateDirectory(nested);
+        var file = Path.Combine(nested, "locked.txt");
+        await File.WriteAllTextAsync(file, "data");
+        var inspector = new StubFileLockInspector(file, 4242, "agent-brain", duplicateHolder: true);
+        var terminated = new List<int>();
+        var context = new CommandContext(new ShellSession(), ThemeConfig.CreateDefault());
+        var cmd = new UnblockCommand(context, inspector, terminated.Add);
+
+        var result = await cmd.ExecuteAsync(new[] { _tempDir }.AsMemory());
+
+        result.Type.ShouldBe(ResultType.OsCommand);
+        result.Output!.ShouldContain("Terminated 1 locking process");
+        result.Output!.ShouldContain("agent-brain");
+        terminated.ShouldBe([4242]);
+        inspector.Paths.ShouldContain(_tempDir);
+        inspector.Paths.ShouldContain(nested);
+        inspector.Paths.ShouldContain(file);
+    }
+
+    [Test]
+    public async Task Unblock_KillOption_IsRejectedWithoutTakingAction()
+    {
+        var file = Path.Combine(_tempDir, "locked.txt");
+        await File.WriteAllTextAsync(file, "data");
+        var inspector = new StubFileLockInspector(file, 4242, "agent-brain");
+        var terminated = new List<int>();
+        var context = new CommandContext(new ShellSession(), ThemeConfig.CreateDefault());
+        var cmd = new UnblockCommand(context, inspector, terminated.Add);
+
+        var result = await cmd.ExecuteAsync(new[] { "--kill", file }.AsMemory());
+
+        result.Type.ShouldBe(ResultType.Error);
+        result.Error!.Message.ShouldContain("unknown option '--kill'");
+        inspector.Paths.ShouldBeEmpty();
+        terminated.ShouldBeEmpty();
+    }
+
     private static void ClearAllAttributes(string path)
     {
         try
@@ -110,5 +171,31 @@ public class UnblockCommandTests : IDisposable
                 ~(FileAttributes.ReadOnly | FileAttributes.Hidden | FileAttributes.System));
         }
         catch { }
+    }
+
+    private sealed class StubFileLockInspector(
+        string lockedPath,
+        int pid,
+        string name,
+        bool duplicateHolder = false) : IFileLockInspector
+    {
+        public IReadOnlyList<string> Paths { get; private set; } = [];
+
+        public Task<List<(int Pid, string Name)>> GetProcessesLockingFileAsync(string path) =>
+            Task.FromResult(new List<(int Pid, string Name)>());
+
+        public Task<List<(string Path, List<(int Pid, string Name)> Holders)>> FindLockedPathsAsync(
+            IReadOnlyList<string> paths)
+        {
+            Paths = paths;
+            var holders = new List<(int Pid, string Name)> { (pid, name) };
+            if (duplicateHolder)
+                holders.Add((pid, name));
+
+            return Task.FromResult(new List<(string Path, List<(int Pid, string Name)> Holders)>
+            {
+                (lockedPath, holders)
+            });
+        }
     }
 }

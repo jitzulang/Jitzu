@@ -1,27 +1,60 @@
+using System.Diagnostics;
 using System.Text;
 
 namespace Jitzu.Shell.Core.Commands;
 
 /// <summary>
-/// Clears delete-blocking file attributes from files and directories.
+/// Clears delete-blocking file attributes and optionally terminates processes locking a path.
 /// </summary>
 public class UnblockCommand : CommandBase
 {
     private const FileAttributes DeleteBlockingAttributes = FileAttributes.ReadOnly | FileAttributes.System;
+    private const string Usage = "Usage: unblock [--attributes-only|-a] <path> [path2 ...]";
 
-    public UnblockCommand(CommandContext context) : base(context) { }
+    private readonly IFileLockInspector _fileLockInspector;
+    private readonly Action<int> _terminateProcess;
 
-    public override Task<ShellResult> ExecuteAsync(ReadOnlyMemory<string> args)
+    public UnblockCommand(CommandContext context)
+        : this(context, new WhoCommand.PlatformFileLockInspector(), TerminateProcess)
+    {
+    }
+
+    internal UnblockCommand(
+        CommandContext context,
+        IFileLockInspector fileLockInspector,
+        Action<int> terminateProcess)
+        : base(context)
+    {
+        _fileLockInspector = fileLockInspector;
+        _terminateProcess = terminateProcess;
+    }
+
+    public override async Task<ShellResult> ExecuteAsync(ReadOnlyMemory<string> args)
     {
         if (args.Length == 0)
-            return Task.FromResult(new ShellResult(ResultType.Error, "",
-                new Exception("Usage: unblock <path> [path2 ...]")));
+            return new ShellResult(ResultType.Error, "", new Exception(Usage));
 
         var summary = new Summary();
         var errors = new List<string>();
+        var paths = new List<string>();
+        var terminateLockingProcesses = true;
 
         foreach (var arg in args.Span)
         {
+            if (arg is "--attributes-only" or "-a")
+                terminateLockingProcesses = false;
+            else if (arg.StartsWith('-'))
+                return new ShellResult(
+                    ResultType.Error,
+                    "",
+                    new Exception($"unblock: unknown option '{arg}'{Environment.NewLine}{Usage}"));
+        }
+
+        foreach (var arg in args.Span)
+        {
+            if (arg is "--attributes-only" or "-a")
+                continue;
+
             var path = ExpandPath(arg);
             if (!File.Exists(path) && !Directory.Exists(path))
             {
@@ -30,23 +63,65 @@ public class UnblockCommand : CommandBase
                 continue;
             }
 
-            UnblockPath(path, summary, errors);
+            UnblockPath(path, summary, errors, paths);
         }
 
-        var output = FormatSummary(summary);
+        if (paths.Count == 0 && errors.Count == 0)
+            return new ShellResult(ResultType.Error, "", new Exception(Usage));
+
+        var lockedPaths = paths.Count == 0
+            ? []
+            : await _fileLockInspector.FindLockedPathsAsync(
+                paths.Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+
+        var holders = lockedPaths
+            .SelectMany(lockedPath => lockedPath.Holders)
+            .DistinctBy(holder => holder.Pid)
+            .OrderBy(holder => holder.Pid)
+            .ToArray();
+
+        var terminated = new List<(int Pid, string Name)>();
+        if (terminateLockingProcesses)
+        {
+            foreach (var holder in holders)
+            {
+                if (holder.Pid == Environment.ProcessId)
+                {
+                    errors.Add($"unblock: refusing to terminate the current Jitzu process (pid {holder.Pid})");
+                    continue;
+                }
+
+                try
+                {
+                    _terminateProcess(holder.Pid);
+                    terminated.Add(holder);
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"unblock: failed to terminate {holder.Name} (pid {holder.Pid}): {ex.Message}");
+                }
+            }
+        }
+
+        var output = FormatSummary(summary, holders, terminated, terminateLockingProcesses);
         if (errors.Count > 0)
         {
             var message = string.Join(Environment.NewLine, errors);
-            return Task.FromResult(new ShellResult(ResultType.Error, output, new Exception(message)));
+            return new ShellResult(ResultType.Error, output, new Exception(message));
         }
 
-        return Task.FromResult(new ShellResult(ResultType.OsCommand, output, null));
+        return new ShellResult(ResultType.OsCommand, output, null);
     }
 
-    private static void UnblockPath(string path, Summary summary, List<string> errors)
+    private static void UnblockPath(
+        string path,
+        Summary summary,
+        List<string> errors,
+        List<string> paths)
     {
         foreach (var entry in EnumerateFileSystemEntriesSafe(path))
         {
+            paths.Add(entry.Path);
             summary.Checked++;
             var blockedAttributes = entry.Attributes & DeleteBlockingAttributes;
             if (blockedAttributes == 0)
@@ -106,7 +181,11 @@ public class UnblockCommand : CommandBase
         }
     }
 
-    private static string FormatSummary(Summary summary)
+    private static string FormatSummary(
+        Summary summary,
+        IReadOnlyList<(int Pid, string Name)> holders,
+        IReadOnlyList<(int Pid, string Name)> terminated,
+        bool terminateLockingProcesses)
     {
         var sb = new StringBuilder();
         if (summary.Changed == 0)
@@ -117,10 +196,32 @@ public class UnblockCommand : CommandBase
         if (summary.Failed > 0)
             sb.Append($" Failed: {summary.Failed}.");
 
-        return sb.ToString();
+        if (holders.Count > 0)
+        {
+            sb.AppendLine();
+            if (terminateLockingProcesses)
+                sb.AppendLine($"Terminated {terminated.Count} locking process{(terminated.Count == 1 ? "" : "es")}:");
+            else
+                sb.AppendLine($"Process locks remain ({holders.Count} process{(holders.Count == 1 ? "" : "es")}):");
+
+            foreach (var (pid, name) in terminateLockingProcesses ? terminated : holders)
+                sb.AppendLine($"  {pid,8}  {name}");
+
+            if (!terminateLockingProcesses)
+                sb.Append("Run without --attributes-only to terminate these processes.");
+        }
+
+        return sb.ToString().TrimEnd();
     }
 
     private static string EntryWord(int count) => count == 1 ? "entry" : "entries";
+
+    private static void TerminateProcess(int pid)
+    {
+        using var process = Process.GetProcessById(pid);
+        process.Kill(entireProcessTree: true);
+        process.WaitForExit(5000);
+    }
 
     private sealed class Summary
     {

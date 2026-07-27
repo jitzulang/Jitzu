@@ -52,7 +52,7 @@ Built-in Commands:
   ln [-s] t link  - Create hard or symbolic link
   stat <file>     - Display file metadata
   chmod +/-r file - Toggle file attributes (r/h/s)
-  unblock <path>  - Clear delete-blocking ReadOnly/System attributes
+  unblock [-a] p  - Clear attributes and terminate locking processes
   whoami          - Print current user name
   hostname        - Print machine name
   uptime          - Show system uptime

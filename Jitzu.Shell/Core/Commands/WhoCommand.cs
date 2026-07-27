@@ -120,7 +120,9 @@ public class WhoCommand : CommandBase
         try
         {
             var protectedEntries = new List<(string Path, FileAttributes Attributes)>();
-            var files = new List<string>();
+            var paths = new List<string> { path };
+            var checkedFiles = 0;
+            var checkedDirectories = 1;
 
             foreach (var entry in EnumerateFileSystemEntriesSafe(path))
             {
@@ -128,33 +130,36 @@ public class WhoCommand : CommandBase
                 if ((attributes & (FileAttributes.ReadOnly | FileAttributes.System)) != 0)
                     protectedEntries.Add((entry.Path, attributes));
 
-                if (!entry.IsDirectory)
-                    files.Add(entry.Path);
+                paths.Add(entry.Path);
+                if (entry.IsDirectory)
+                    checkedDirectories++;
+                else
+                    checkedFiles++;
             }
 
-            var lockedFiles = await _fileLockInspector.FindLockedFilesAsync(files);
-            var checkedFiles = files.Count;
+            var lockedPaths = await _fileLockInspector.FindLockedPathsAsync(paths);
 
-            if (lockedFiles.Count == 0 && protectedEntries.Count == 0)
+            if (lockedPaths.Count == 0 && protectedEntries.Count == 0)
                 return new ShellResult(ResultType.OsCommand,
-                    $"No processes hold a lock on files under '{path}' ({checkedFiles} file(s) checked).", null);
+                    $"No processes hold a lock on or under '{path}' " +
+                    $"({checkedDirectories} director{(checkedDirectories == 1 ? "y" : "ies")} and {checkedFiles} file(s) checked).", null);
 
             var sb = new StringBuilder();
             var label = Theme["ls.config"];
             var reset = ThemeConfig.Reset;
-            var totalHolders = lockedFiles.Sum(file => file.Holders.Count);
+            var totalHolders = lockedPaths.Sum(lockedPath => lockedPath.Holders.Count);
 
             sb.AppendLine($"{label}Directory:{reset} {path}");
-            sb.AppendLine($"{label}Checked:{reset} {checkedFiles} file(s)");
-            if (lockedFiles.Count > 0)
-                sb.AppendLine($"{label}Held by {totalHolders} process(es) across {lockedFiles.Count} file(s):{reset}");
+            sb.AppendLine($"{label}Checked:{reset} {checkedDirectories} director{(checkedDirectories == 1 ? "y" : "ies")} and {checkedFiles} file(s)");
+            if (lockedPaths.Count > 0)
+                sb.AppendLine($"{label}Held by {totalHolders} process(es) across {lockedPaths.Count} path(s):{reset}");
             else
                 sb.AppendLine($"{label}Process locks:{reset} none found");
 
-            foreach (var lockedFile in lockedFiles)
+            foreach (var lockedPath in lockedPaths)
             {
-                sb.AppendLine(Path.GetRelativePath(path, lockedFile.Path));
-                foreach (var (hpid, hname) in lockedFile.Holders)
+                sb.AppendLine(Path.GetRelativePath(path, lockedPath.Path));
+                foreach (var (hpid, hname) in lockedPath.Holders)
                     sb.AppendLine($"  {hpid,8}  {hname}");
             }
 
@@ -173,7 +178,7 @@ public class WhoCommand : CommandBase
         }
     }
 
-    private sealed class PlatformFileLockInspector : IFileLockInspector
+    internal sealed class PlatformFileLockInspector : IFileLockInspector
     {
         public async Task<List<(int Pid, string Name)>> GetProcessesLockingFileAsync(string path)
         {
@@ -183,7 +188,7 @@ public class WhoCommand : CommandBase
             return await GetProcessesLockingFileUnixAsync(path);
         }
 
-        public async Task<List<(string Path, List<(int Pid, string Name)> Holders)>> FindLockedFilesAsync(IReadOnlyList<string> paths)
+        public async Task<List<(string Path, List<(int Pid, string Name)> Holders)>> FindLockedPathsAsync(IReadOnlyList<string> paths)
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
@@ -228,9 +233,10 @@ public class WhoCommand : CommandBase
             {
                 var attributes = entry.Attributes;
                 var isDirectory = (attributes & FileAttributes.Directory) != 0;
+                var isReparsePoint = (attributes & FileAttributes.ReparsePoint) != 0;
                 yield return (entry.FullName, attributes, isDirectory);
 
-                if (isDirectory)
+                if (isDirectory && !isReparsePoint)
                     pending.Push(entry.FullName);
             }
         }
@@ -330,5 +336,5 @@ internal interface IFileLockInspector
 {
     Task<List<(int Pid, string Name)>> GetProcessesLockingFileAsync(string path);
 
-    Task<List<(string Path, List<(int Pid, string Name)> Holders)>> FindLockedFilesAsync(IReadOnlyList<string> paths);
+    Task<List<(string Path, List<(int Pid, string Name)> Holders)>> FindLockedPathsAsync(IReadOnlyList<string> paths);
 }

@@ -82,7 +82,8 @@ public class WhoCommandTests : IDisposable
         var result = await _cmd.ExecuteAsync(new[] { _tempDir }.AsMemory());
 
         result.Type.ShouldBe(ResultType.OsCommand);
-        result.Output!.ShouldContain("files under");
+        result.Output!.ShouldContain("on or under");
+        result.Output!.ShouldContain("2 directories");
         result.Output!.ShouldContain("1 file(s) checked");
     }
 
@@ -103,7 +104,23 @@ public class WhoCommandTests : IDisposable
         result.Output!.ShouldContain("50 file(s) checked");
         inspector.FileLookupCount.ShouldBe(0);
         inspector.BatchLookupCount.ShouldBe(1);
-        inspector.LastBatchPathCount.ShouldBe(50);
+        inspector.LastBatchPathCount.ShouldBe(51);
+    }
+
+    [Test]
+    public async Task Who_EmptyDirectory_IncludesRootInLockLookup()
+    {
+        var inspector = new RootDirectoryLockInspector(_tempDir);
+        var theme = ThemeConfig.CreateDefault();
+        var context = new CommandContext(new ShellSession(), theme);
+        var cmd = new WhoCommand(context, inspector);
+
+        var result = await cmd.ExecuteAsync(new[] { _tempDir }.AsMemory());
+
+        result.Type.ShouldBe(ResultType.OsCommand);
+        result.Output!.ShouldContain(Environment.ProcessId.ToString());
+        result.Output!.ShouldContain("1 path(s)");
+        inspector.Paths.ShouldBe([_tempDir]);
     }
 
     [Test]
@@ -174,11 +191,29 @@ public class WhoCommandTests : IDisposable
             return Task.FromResult(new List<(int Pid, string Name)>());
         }
 
-        public Task<List<(string Path, List<(int Pid, string Name)> Holders)>> FindLockedFilesAsync(IReadOnlyList<string> paths)
+        public Task<List<(string Path, List<(int Pid, string Name)> Holders)>> FindLockedPathsAsync(IReadOnlyList<string> paths)
         {
             BatchLookupCount++;
             LastBatchPathCount = paths.Count;
             return Task.FromResult(new List<(string Path, List<(int Pid, string Name)> Holders)>());
+        }
+    }
+
+    private sealed class RootDirectoryLockInspector(string rootPath) : IFileLockInspector
+    {
+        public IReadOnlyList<string> Paths { get; private set; } = [];
+
+        public Task<List<(int Pid, string Name)>> GetProcessesLockingFileAsync(string path) =>
+            Task.FromResult(new List<(int Pid, string Name)>());
+
+        public Task<List<(string Path, List<(int Pid, string Name)> Holders)>> FindLockedPathsAsync(
+            IReadOnlyList<string> paths)
+        {
+            Paths = paths;
+            return Task.FromResult(new List<(string Path, List<(int Pid, string Name)> Holders)>
+            {
+                (rootPath, [(Environment.ProcessId, "test")])
+            });
         }
     }
 }
