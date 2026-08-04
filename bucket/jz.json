@@ -1,9 +1,9 @@
 {
-  "version": "0.1.39",
+  "version": "0.1.40",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/jitzulang/jitzu/releases/download/v0.1.39/jitzu-0.1.39-win-x64.zip",
-      "hash": "437f78b5ad2b94d4a84159926f8b133c6e12af2cc8b07dfbf65dcaed2e1bab8f"
+      "url": "https://github.com/jitzulang/jitzu/releases/download/v0.1.40/jitzu-0.1.40-win-x64.zip",
+      "hash": "1a2b7ea62b1ac8070565d852257b0adeeb48057e8ccae32d7286be4c51a63b56"
     }
   },
   "bin": "jz.exe",
