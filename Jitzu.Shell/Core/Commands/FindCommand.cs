@@ -1,5 +1,6 @@
 using System.IO.Enumeration;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Jitzu.Shell.Core.Commands;
 
@@ -22,12 +23,17 @@ public class FindCommand : CommandBase
             string? namePattern = null;
             string? extension = null;
             char? typeFilter = null; // 'f' for file, 'd' for directory
+            var useGitIgnore = false;
 
             for (var i = 0; i < args.Length; i++)
             {
                 var arg = args.Span[i];
                 switch (arg)
                 {
+                    case "-i":
+                    case "--gitignore":
+                        useGitIgnore = true;
+                        break;
                     case "-name" when i + 1 < args.Length:
                         namePattern = args.Span[++i];
                         break;
@@ -55,8 +61,9 @@ public class FindCommand : CommandBase
             var dirColor = Theme["ls.directory"];
             var reset = ThemeConfig.Reset;
             var count = 0;
+            var ignoreMatcher = useGitIgnore ? GitIgnoreMatcher.TryCreate(fullPath) : null;
 
-            foreach (var entry in Directory.EnumerateFileSystemEntries(fullPath, "*", SearchOption.AllDirectories))
+            foreach (var entry in EnumerateEntries(fullPath, ignoreMatcher))
             {
                 var isDir = Directory.Exists(entry);
                 var name = Path.GetFileName(entry);
@@ -104,4 +111,125 @@ public class FindCommand : CommandBase
     /// </summary>
     private static bool MatchGlob(string name, string pattern) =>
         FileSystemName.MatchesSimpleExpression(pattern, name, ignoreCase: true);
+
+    private static IEnumerable<string> EnumerateEntries(string root, GitIgnoreMatcher? ignoreMatcher)
+    {
+        var pending = new Stack<string>();
+        if (ignoreMatcher?.IsIgnoredDirectory(root) == true)
+            yield break;
+        pending.Push(root);
+
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+            IEnumerable<string> entries;
+            try
+            {
+                entries = Directory.EnumerateFileSystemEntries(directory);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var entry in entries)
+            {
+                var isDirectory = Directory.Exists(entry);
+                if (isDirectory && ignoreMatcher?.IsIgnoredDirectory(entry) == true)
+                    continue;
+
+                yield return entry;
+                if (isDirectory)
+                    pending.Push(entry);
+            }
+        }
+    }
+
+    private sealed class GitIgnoreMatcher
+    {
+        private readonly string _root;
+        private readonly Regex[] _patterns;
+
+        private GitIgnoreMatcher(string root, Regex[] patterns)
+        {
+            _root = root;
+            _patterns = patterns;
+        }
+
+        public static GitIgnoreMatcher? TryCreate(string searchPath)
+        {
+            var root = FindRepositoryRoot(searchPath);
+            if (root is null)
+                return null;
+
+            var ignoreFile = Path.Combine(root, ".gitignore");
+            if (!File.Exists(ignoreFile))
+                return new GitIgnoreMatcher(root, []);
+
+            var patterns = File.ReadLines(ignoreFile)
+                .Select(ToDirectoryRegex)
+                .Where(pattern => pattern is not null)
+                .Select(pattern => pattern!)
+                .ToArray();
+            return new GitIgnoreMatcher(root, patterns);
+        }
+
+        public bool IsIgnoredDirectory(string path)
+        {
+            if (string.Equals(Path.GetFileName(path), ".git", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var relative = Path.GetRelativePath(_root, path).Replace(Path.DirectorySeparatorChar, '/');
+            return _patterns.Any(pattern => pattern.IsMatch(relative));
+        }
+
+        private static string? FindRepositoryRoot(string path)
+        {
+            var directory = new DirectoryInfo(path);
+            while (directory is not null)
+            {
+                if (File.Exists(Path.Combine(directory.FullName, ".git")) ||
+                    Directory.Exists(Path.Combine(directory.FullName, ".git")))
+                    return directory.FullName;
+                directory = directory.Parent;
+            }
+            return null;
+        }
+
+        private static Regex? ToDirectoryRegex(string line)
+        {
+            line = line.Trim();
+            if (line.Length == 0 || line.StartsWith('#') || line.StartsWith('!'))
+                return null;
+
+            line = line.TrimEnd('/');
+            if (line.Length == 0)
+                return null;
+
+            var anchored = line.StartsWith('/');
+            line = line.TrimStart('/');
+            var expression = GlobToRegex(line, anchored);
+            return new Regex(expression, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        private static string GlobToRegex(string glob, bool anchored)
+        {
+            var result = new StringBuilder("^");
+            if (!anchored) result.Append("(?:.*/)?");
+
+            for (var i = 0; i < glob.Length; i++)
+            {
+                if (glob[i] == '*' && i + 1 < glob.Length && glob[i + 1] == '*')
+                {
+                    result.Append(".*");
+                    i++;
+                }
+                else if (glob[i] == '*') result.Append("[^/]*");
+                else if (glob[i] == '?') result.Append("[^/]");
+                else result.Append(Regex.Escape(glob[i].ToString()));
+            }
+
+            return result.Append("(?:/.*)?$").ToString();
+        }
+    }
 }

@@ -311,4 +311,43 @@ public class FindCommandTests : IDisposable
         var (output, _) = await Run(_tempDir, "-name", "data[0].json");
         output.ShouldContain("data[0].json");
     }
+
+    // --- .gitignore opt-in ---
+
+    [Test]
+    public async Task GitIgnore_IsOptIn()
+    {
+        CreateDir("bin");
+        CreateFile("bin/generated.dll");
+        File.WriteAllText(Path.Combine(_tempDir, ".gitignore"), "bin/\n");
+
+        var (output, _) = await Run(_tempDir);
+        output.ShouldContain("generated.dll");
+    }
+
+    [Test]
+    public async Task GitIgnore_SkipsIgnoredDirectories()
+    {
+        Directory.CreateDirectory(Path.Combine(_tempDir, ".git"));
+        CreateDir("bin");
+        CreateFile("bin/generated.dll");
+        CreateFile("src/main.cs");
+        File.WriteAllText(Path.Combine(_tempDir, ".gitignore"), "bin/\n");
+
+        var (output, _) = await Run(_tempDir, "--gitignore");
+        output.ShouldNotContain("generated.dll");
+        output.ShouldContain("main.cs");
+    }
+
+    [Test]
+    public async Task GitIgnore_DetectsRepositoryFromNestedSearchPath()
+    {
+        Directory.CreateDirectory(Path.Combine(_tempDir, ".git"));
+        CreateDir("bin");
+        CreateFile("bin/generated.dll");
+        File.WriteAllText(Path.Combine(_tempDir, ".gitignore"), "bin/\n");
+
+        var (output, _) = await Run(Path.Combine(_tempDir, "bin"), "-i");
+        output.ShouldBe("No matches found.");
+    }
 }

@@ -39,6 +39,7 @@ Built-in Commands:
   sort [-r/-n/-u]  - Sort lines in a file
   uniq [-c/-d] f   - Remove consecutive duplicate lines
   find path [opts] - Recursive file search
+                   -i, --gitignore  skip directories ignored by .gitignore
                    -name pattern  filename pattern
                    -type f|d      files or directories
                    -ext .cs       filter by extension
