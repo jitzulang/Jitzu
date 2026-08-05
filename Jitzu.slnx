@@ -2,5 +2,7 @@
   <Project Path="Jitzu.Benchmarking/Jitzu.Benchmarking.csproj" />
   <Project Path="Jitzu.Core/Jitzu.Core.csproj" />
   <Project Path="Jitzu.Shell/Jitzu.Shell.csproj" />
+  <Project Path="Jitzu.StartupBenchmark/Jitzu.StartupBenchmark.csproj" />
+  <Project Path="Jitzu.StartupTraceSummary/Jitzu.StartupTraceSummary.csproj" />
   <Project Path="Jitzu.Tests/Jitzu.Tests.csproj" />
 </Solution>

@@ -1,0 +1,40 @@
+{
+  "SchemaVersion": 1,
+  "SourceSha256": "6C3D48CC771D5B7F4C2953F836616DAF4A2807EAA951BF4662E219F6FC375196",
+  "SourceLengthBytes": 236530,
+  "TraceHeader": "Tracing enabled @ Wed Aug  5 15:31:06 2026 GMT",
+  "Stages": [
+    {
+      "Name": "apphost-invoked",
+      "FirstLine": 2,
+      "Count": 1
+    },
+    {
+      "Name": "single-file-bundle-detected",
+      "FirstLine": 10,
+      "Count": 1
+    },
+    {
+      "Name": "internal-fxr-selected",
+      "FirstLine": 11,
+      "Count": 1
+    },
+    {
+      "Name": "bundle-startup-entered",
+      "FirstLine": 12,
+      "Count": 2
+    },
+    {
+      "Name": "bundle-extraction-directory-configured",
+      "FirstLine": 2282,
+      "Count": 1
+    },
+    {
+      "Name": "managed-assembly-executed",
+      "FirstLine": 2299,
+      "Count": 1
+    }
+  ],
+  "TimingResolution": "The host trace records only a wall-clock header, not per-stage timestamps; stage duration is not derivable.",
+  "Privacy": "Only known stage names, line positions/counts, source digest/length, and the non-identifying trace header are retained."
+}

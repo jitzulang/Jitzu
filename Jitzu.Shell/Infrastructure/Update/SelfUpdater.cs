@@ -118,10 +118,7 @@ public static class SelfUpdater
 
             if (OperatingSystem.IsWindows())
             {
-                // Windows: rename current → .old, copy new to original path
-                var oldPath = GetAvailableOldPath(currentPath);
-                File.Move(currentPath, oldPath);
-                File.Copy(newBinaryPath, currentPath);
+                ReplaceWindowsBinary(currentPath, newBinaryPath);
             }
             else
             {
@@ -176,19 +173,86 @@ public static class SelfUpdater
 
     internal static IEnumerable<string> GetOldPathsToClean(string currentPath)
     {
-        var oldPath = currentPath + ".old";
-        if (!File.Exists(oldPath))
+        var fullPath = Path.GetFullPath(currentPath);
+        var directory = Path.GetDirectoryName(fullPath)!;
+        if (!Directory.Exists(directory))
             yield break;
 
-        yield return oldPath;
-
-        for (var i = 2; ; i++)
+        var oldName = Path.GetFileName(fullPath) + ".old";
+        var matches = new List<(int Order, string Path)>();
+        foreach (var candidate in Directory.EnumerateFiles(directory, oldName + "*"))
         {
-            var candidate = $"{oldPath}.{i}";
-            if (!File.Exists(candidate))
-                yield break;
+            var name = Path.GetFileName(candidate);
+            if (name.Equals(oldName, StringComparison.OrdinalIgnoreCase))
+            {
+                matches.Add((1, candidate));
+                continue;
+            }
 
-            yield return candidate;
+            var suffix = name.AsSpan(oldName.Length);
+            if (suffix.Length > 1 && suffix[0] == '.'
+                && int.TryParse(suffix[1..], out var order) && order >= 2)
+                matches.Add((order, candidate));
+        }
+
+        foreach (var match in matches.OrderBy(match => match.Order).ThenBy(match => match.Path, StringComparer.Ordinal))
+            yield return match.Path;
+    }
+
+    internal static void CleanupOldBinaries(string currentPath)
+    {
+        foreach (var oldPath in GetOldPathsToClean(currentPath).ToArray())
+        {
+            try { File.Delete(oldPath); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    internal static void ReplaceWindowsBinary(string currentPath, string newBinaryPath,
+        Action? afterCurrentMoved = null, Action? beforeRollback = null)
+    {
+        var targetDirectory = Path.GetDirectoryName(Path.GetFullPath(currentPath))!;
+        var stagedPath = Path.Combine(targetDirectory, $".jz-update-{Guid.NewGuid():N}.tmp");
+        var oldPath = GetAvailableOldPath(currentPath);
+        var currentMoved = false;
+        try
+        {
+            using (var source = new FileStream(newBinaryPath, FileMode.Open, FileAccess.Read,
+                       FileShare.Read, 4096, FileOptions.SequentialScan))
+            using (var staged = new FileStream(stagedPath, FileMode.CreateNew, FileAccess.Write,
+                       FileShare.None, 4096, FileOptions.WriteThrough))
+            {
+                source.CopyTo(staged);
+                staged.Flush(flushToDisk: true);
+            }
+
+            File.Move(currentPath, oldPath);
+            currentMoved = true;
+            afterCurrentMoved?.Invoke();
+            File.Move(stagedPath, currentPath, overwrite: false);
+        }
+        catch (Exception updateFailure)
+        {
+            if (currentMoved && !File.Exists(currentPath))
+            {
+                try
+                {
+                    beforeRollback?.Invoke();
+                    File.Move(oldPath, currentPath, overwrite: false);
+                }
+                catch (Exception rollbackFailure)
+                {
+                    throw new AggregateException(
+                        "The update failed and the original binary could not be restored; the .old copy was retained.",
+                        updateFailure, rollbackFailure);
+                }
+            }
+            throw;
+        }
+        finally
+        {
+            try { File.Delete(stagedPath); } catch { }
         }
     }
 }

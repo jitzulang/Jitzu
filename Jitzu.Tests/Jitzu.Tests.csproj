@@ -22,6 +22,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Jitzu.Shell\Jitzu.Shell.csproj" />
+    <ProjectReference Include="..\Jitzu.StartupBenchmark\Jitzu.StartupBenchmark.csproj" />
+    <ProjectReference Include="..\Jitzu.StartupTraceSummary\Jitzu.StartupTraceSummary.csproj" />
   </ItemGroup>
 
 </Project>

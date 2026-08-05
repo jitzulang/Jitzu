@@ -9,7 +9,7 @@ public class ExitCommand : CommandBase
 
     public override Task<ShellResult> ExecuteAsync(ReadOnlyMemory<string> args)
     {
-        Environment.Exit(0);
+        Context.ExitRequested = true;
         return Task.FromResult(new ShellResult(ResultType.Jitzu, "", null));
     }
 }

@@ -12,6 +12,7 @@ public class CommandContext
     public HistoryManager? HistoryManager { get; }
     public ExecutionStrategy? Strategy { get; set; }
     public BuiltinCommands? BuiltinCommands { get; set; }
+    public bool ExitRequested { get; set; }
 
     public CommandContext(
         ShellSession session,

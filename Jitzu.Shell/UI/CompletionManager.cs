@@ -9,22 +9,20 @@ namespace Jitzu.Shell.UI;
 /// <summary>
 /// Handles interactive input with history and tab completion.
 /// </summary>
-public class CompletionManager(ShellSession session, BuiltinCommands builtinCommands, LabelManager? labelManager = null)
+public class CompletionManager
 {
     private static readonly SearchValues<char> PathSeparators = SearchValues.Create("\\/");
 
     private static readonly FrozenSet<string> StrippableExtensions =
         new[] { ".exe", ".cmd", ".bat", ".com", ".ps1" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-    private readonly string _homePath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-    private readonly string _normalizedHomePath = NormaliseSeparators(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
-    private readonly string[] _pathDirectories =
-        Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
-    private readonly string[] _executableExtensions = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-        ? Environment.GetEnvironmentVariable("PATHEXT")?.Split(Path.PathSeparator)
-            ?? [".EXE", ".CMD", ".BAT", ".COM", ".PS1"]
-        : [".exe", ""];
+    private readonly ShellSession session;
+    private readonly BuiltinCommands builtinCommands;
+    private readonly LabelManager? labelManager;
+    private readonly string _homePath;
+    private readonly string _normalizedHomePath;
+    private string[]? _pathDirectories;
+    private string[]? _executableExtensions;
     private readonly bool _isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
 
     private static readonly StringComparer FileNameComparer =
@@ -33,6 +31,25 @@ public class CompletionManager(ShellSession session, BuiltinCommands builtinComm
             : StringComparer.Ordinal;
 
     private Dictionary<string, (DateTime LastWrite, HashSet<string> FileNames)>? _pathDirectoryCache;
+
+    public CompletionManager(ShellSession session, BuiltinCommands builtinCommands,
+        LabelManager? labelManager = null, string? homePath = null)
+    {
+        this.session = session;
+        this.builtinCommands = builtinCommands;
+        this.labelManager = labelManager;
+        _homePath = homePath ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        _normalizedHomePath = NormaliseSeparators(_homePath);
+    }
+
+    private string[] PathDirectories => _pathDirectories ??=
+        Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
+
+    private string[] ExecutableExtensions => _executableExtensions ??=
+        RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? Environment.GetEnvironmentVariable("PATHEXT")?.Split(Path.PathSeparator)
+              ?? [".EXE", ".CMD", ".BAT", ".COM", ".PS1"]
+            : [".exe", ""];
 
     public string[] GetCompletions(string input)
     {
@@ -195,11 +212,11 @@ public class CompletionManager(ShellSession session, BuiltinCommands builtinComm
             HashSet<string>? seen = null;
             List<ExecutableCompletion>? results = null;
 
-            foreach (var ext in _executableExtensions)
+            foreach (var ext in ExecutableExtensions)
             {
                 var searchTerm = Path.ChangeExtension(searchValue, ext);
 
-                foreach (var dir in _pathDirectories)
+                foreach (var dir in PathDirectories)
                 {
                     var fileNames = GetCachedFileNames(dir);
                     if (fileNames is null || !fileNames.Contains(searchTerm))

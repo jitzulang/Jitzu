@@ -1,0 +1,46 @@
+{
+  "SchemaVersion": 1,
+  "SourceSha256": "AD51D6A132184FA1418E04DDC6A379D506EE3011498A2AFF1EE851081E10E320",
+  "SourceLengthBytes": 597470,
+  "Runtime": {
+    "runtimeEvents": 524,
+    "firstRuntimeMs": 5.2067,
+    "lastRuntimeMs": 84.6737,
+    "RuntimeStart": {
+      "Count": 1,
+      "FirstMs": 5.2067,
+      "LastMs": 5.2067
+    },
+    "Jit": {
+      "Count": 179,
+      "FirstMs": 18.3268,
+      "LastMs": 84.4954
+    },
+    "Modules": {
+      "Count": 18,
+      "FirstMs": 12.4345,
+      "LastMs": 68.2856
+    },
+    "Assemblies": {
+      "Count": 18,
+      "FirstMs": 12.421,
+      "LastMs": 68.2815
+    }
+  },
+  "Phases": {
+    "aliases-loaded": 69.6941,
+    "commands-registered": 73.8644,
+    "config-loaded": 75.3741,
+    "history-loaded": 69.3426,
+    "input-accepted": 79.0297,
+    "input-ready": 78.6249,
+    "managed-entry": 49.7931,
+    "options-parsed": 61.9066,
+    "repl-entry": 66.8834,
+    "state-loaded": 69.8272,
+    "theme-loaded": 68.7825
+  },
+  "RuntimeStartToManagedEntryMs": 44.586400000000005,
+  "ClockScope": "All reported timings use the EventPipe session clock. Startup suspension makes process-launch to RuntimeStart unsuitable for production timing.",
+  "Privacy": "Only counts, relative timestamps, known Jitzu phase names, and source digest are retained."
+}

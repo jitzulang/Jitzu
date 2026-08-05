@@ -171,6 +171,10 @@ public class ReadLine(
         ClearCompletions();
 
         Console.CancelKeyPress += OnCancel;
+        // This marker is the readiness boundary: prompt and cursor are rendered and
+        // the cancellation handler is installed immediately before accepting keys.
+        Infrastructure.Logging.StartupProfiler.Mark("first-prompt-rendered");
+        Infrastructure.Logging.StartupProfiler.Mark("input-ready-interactive");
         try
         {
             while (true)

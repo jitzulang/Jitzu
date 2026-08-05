@@ -1,0 +1,27 @@
+{
+  "SchemaVersion": 1,
+  "SourceSha256": "55940E492E6F95B2EBE114BF1F7BB7FB0A03A9D8B514BAD69F24C5D41BDBE668",
+  "SourceLengthBytes": 538730,
+  "Runtime": {
+    "runtimeEvents": 477,
+    "firstRuntimeMs": 8.2611,
+    "lastRuntimeMs": 141.7382,
+    "Jit": {
+      "Count": 155,
+      "FirstMs": 30.0023,
+      "LastMs": 141.3941
+    },
+    "Modules": {
+      "Count": 18,
+      "FirstMs": 19.8589,
+      "LastMs": 138.5902
+    },
+    "Assemblies": {
+      "Count": 18,
+      "FirstMs": 19.8414,
+      "LastMs": 138.5817
+    }
+  },
+  "Phases": {},
+  "Privacy": "Only counts, relative timestamps, known Jitzu phase names, and source digest are retained."
+}

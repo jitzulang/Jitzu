@@ -23,8 +23,6 @@ public class ShellSession
     // loaded BCL assembly.
     public RuntimeProgram Program => EnsureInitializedAsync().GetAwaiter().GetResult();
 
-    public static Task<ShellSession> CreateAsync() => Task.FromResult(new ShellSession());
-
     private async Task<RuntimeProgram> EnsureInitializedAsync()
     {
         if (_program is not null)

@@ -8,31 +8,61 @@ public class HistoryManager
     private readonly bool _persist;
     private readonly List<string> _history = [];
     private readonly HashSet<string> _historySet = [];
+    private readonly Infrastructure.PersistentFileGuard _fileGuard;
 
     public int Count => _history.Count;
     public string this[int historyIndex] => _history[historyIndex];
+    public string? PersistenceWarning => _fileGuard.DegradedReason;
 
-    public HistoryManager(bool persist = true)
+    public HistoryManager(bool persist = true) : this(persist, persist
+        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Jitzu", "history.txt")
+        : "")
     {
-        _persist = persist;
-        var appData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Jitzu");
-        if (_persist)
-            Directory.CreateDirectory(appData);
-        _historyFile = Path.Combine(appData, "history.txt");
     }
 
-    public async Task InitialiseAsync()
+    internal HistoryManager(bool persist, string historyFile, Action<string>? beforeAtomicReplace = null,
+        Action<string>? afterAtomicReplace = null, Action<string>? afterSuccessfulCommit = null,
+        Func<string, ReadOnlyMemory<byte>, Task>? temporaryWriter = null)
+    {
+        _persist = persist;
+        _historyFile = historyFile;
+        _fileGuard = new Infrastructure.PersistentFileGuard(
+            historyFile, persist, beforeAtomicReplace, afterAtomicReplace, afterSuccessfulCommit, temporaryWriter);
+    }
+
+    public void Initialise()
     {
         if (!_persist)
-            return;
-
-        if (!File.Exists(_historyFile))
         {
-            await File.WriteAllTextAsync(_historyFile, "");
+            Infrastructure.Logging.StartupProfiler.Mark("history-loaded");
             return;
         }
 
-        var lines = await File.ReadAllLinesAsync(_historyFile);
+        // Startup must consume this small local file before predictions are usable;
+        // synchronous I/O avoids paying for the thread-pool I/O machinery on the critical path.
+        string[] lines;
+        try
+        {
+            lines = Infrastructure.StartupFileReader.ReadAllLines(
+                _historyFile, Infrastructure.StartupFileReader.HistoryMaxBytes);
+        }
+        catch (FileNotFoundException)
+        {
+            Infrastructure.Logging.StartupProfiler.Mark("history-loaded");
+            return;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            Infrastructure.Logging.StartupProfiler.Mark("history-loaded");
+            return;
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException
+                                   or System.Security.SecurityException)
+        {
+            _fileGuard.Degrade(ex.Message);
+            Infrastructure.Logging.StartupProfiler.Mark("history-loaded");
+            return;
+        }
 
         // Deduplicate on load - keep only the last occurrence of each command
         var deduplicated = new List<string>();
@@ -51,6 +81,7 @@ public class HistoryManager
             _history.Add(entry);
             _historySet.Add(entry);
         }
+        Infrastructure.Logging.StartupProfiler.Mark("history-loaded");
     }
 
     public int SearchBackward(string query, int startIndex)
@@ -136,16 +167,34 @@ public class HistoryManager
 
     public async Task RemoveAsync(string entry)
     {
-        if (!_historySet.Remove(entry))
+        if (!_historySet.Contains(entry))
             return;
 
+        _historySet.Remove(entry);
         _history.Remove(entry);
 
         if (_persist)
-            await File.WriteAllLinesAsync(_historyFile, _history);
+        {
+            var content = string.Concat(_history.Select(line => line + Environment.NewLine));
+            await _fileGuard.ReplaceAtomicallyAsync(System.Text.Encoding.UTF8.GetBytes(content));
+        }
     }
 
     public async Task WriteAsync(string historyItem)
+    {
+        if (string.IsNullOrWhiteSpace(historyItem))
+            return;
+
+        Record(historyItem);
+
+        if (_persist)
+        {
+            var content = string.Concat(_history.Select(line => line + Environment.NewLine));
+            await _fileGuard.ReplaceAtomicallyAsync(System.Text.Encoding.UTF8.GetBytes(content));
+        }
+    }
+
+    public void Record(string historyItem)
     {
         if (string.IsNullOrWhiteSpace(historyItem))
             return;
@@ -155,8 +204,5 @@ public class HistoryManager
             _history.Remove(historyItem);
 
         _history.Add(historyItem);
-
-        if (_persist)
-            await File.AppendAllTextAsync(_historyFile, historyItem + Environment.NewLine);
     }
 }

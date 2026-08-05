@@ -14,66 +14,71 @@ using Jitzu.Shell.Infrastructure.Logging;
 using Jitzu.Shell.Models;
 using System.Reflection;
 
+StartupProfiler.Mark("managed-entry");
 Console.OutputEncoding = Encoding.UTF8;
 EnableAnsiSupport();
 
 var (hostArgs, scriptArgs) = JitzuOptions.SplitArgs(args);
 var options = JitzuOptions.Parse(hostArgs);
+StartupProfiler.Mark("options-parsed");
 if (scriptArgs.Length > 0)
     options.ScriptArgs = scriptArgs;
-
-// Clean up leftover upgrade file from previous self-update (Windows)
-CleanupOldBinary();
 
 DebugLogger.SetIsEnabled(options.Debug);
 Telemetry.SetIsEnabled(options.Telemetry);
 
-// 1. Sudo gate — must be first, re-launched elevated child
-if (options.SudoExec is not null || options.SudoShell || options.SudoLogin)
+try
 {
-    await HandleElevatedEntry(options);
-    return;
-}
-
-// 2. --install-path → print dir, exit
-if (options.InstallPath)
-{
-    Console.WriteLine(AppDomain.CurrentDomain.BaseDirectory);
-    return;
-}
-
-// 3. -c "command" → execute via Shell's ExecutionStrategy
-if (options.Command is { } command)
-{
-    await ExecuteCommand(command, options.Persist);
-    return;
-}
-
-// 4. ScriptPath == "upgrade" → self-update
-if (options.ScriptPath is "upgrade")
-{
-    await Jitzu.Shell.Infrastructure.Update.SelfUpdater.RunAsync(force: false);
-    return;
-}
-
-// 5. ScriptPath exists → full compilation pipeline (Interpreter path)
-if (options.ScriptPath is { } scriptPath)
-{
-    if (File.Exists(Path.ChangeExtension(scriptPath, "jz")) || File.Exists(scriptPath))
+    // 1. Sudo gate — must be first, re-launched elevated child
+    if (options.SudoExec is not null || options.SudoShell || options.SudoLogin)
     {
-        var exitCode = await RunScript(scriptPath, options);
-        Console.Out.Flush();
-        Environment.Exit(exitCode);
+        await HandleElevatedEntry(options);
         return;
     }
 
-    Console.WriteLine($"File not found: {scriptPath}");
-    Environment.Exit(1);
-    return;
-}
+    // 2. --install-path → print dir, exit
+    if (options.InstallPath)
+    {
+        Console.WriteLine(AppDomain.CurrentDomain.BaseDirectory);
+        return;
+    }
 
-// 6. Default (no args) → Shell REPL
-await RunReplAsync(options);
+    // 3. -c "command" → execute via Shell's ExecutionStrategy
+    if (options.Command is { } command)
+    {
+        Environment.ExitCode = await ExecuteCommand(command, options.Persist, options.Config);
+        return;
+    }
+
+    // 4. ScriptPath == "upgrade" → self-update
+    if (options.ScriptPath is "upgrade")
+    {
+        await Jitzu.Shell.Infrastructure.Update.SelfUpdater.RunAsync(force: false);
+        return;
+    }
+
+    // 5. ScriptPath exists → full compilation pipeline (Interpreter path)
+    if (options.ScriptPath is { } scriptPath)
+    {
+        if (File.Exists(Path.ChangeExtension(scriptPath, "jz")) || File.Exists(scriptPath))
+        {
+            Environment.ExitCode = await RunScript(scriptPath, options);
+            Console.Out.Flush();
+            return;
+        }
+
+        Console.WriteLine($"File not found: {scriptPath}");
+        Environment.ExitCode = 1;
+        return;
+    }
+
+    // 6. Default (no args) → Shell REPL
+    await RunReplAsync(options);
+}
+finally
+{
+    CleanupOldBinary();
+}
 return;
 
 async Task<int> RunScript(string filePath, JitzuOptions opts)
@@ -168,46 +173,56 @@ static ScriptExpression ParseProgram(FileInfo entryPoint)
     }
 }
 
-static async Task ExecuteCommand(string command, bool persist)
+static async Task<int> ExecuteCommand(string command, bool persist, bool loadUserConfig)
 {
-    var themeTask = ThemeConfig.LoadAsync();
-    var sessionTask = ShellSession.CreateAsync();
-    var aliasManager = new AliasManager(persist);
-    var aliasTask = aliasManager.InitialiseAsync();
-    await Task.WhenAll(themeTask, sessionTask, aliasTask);
-    var theme = await themeTask;
-    var session = await sessionTask;
-    var labelManager = new LabelManager();
-    var builtins = new BuiltinCommands(session, theme, aliasManager, labelManager);
-    var strategy = new ExecutionStrategy(session, builtins, aliasManager, labelManager);
-    builtins.SetStrategy(strategy);
+    var theme = ThemeConfig.Load(loadUserConfig);
+    try
+    {
+        var session = new ShellSession();
+        var aliasManager = new AliasManager(persist);
+        aliasManager.Initialise();
+        var labelManager = new LabelManager();
+        var builtins = new BuiltinCommands(session, theme, aliasManager, labelManager);
+        var strategy = new ExecutionStrategy(session, builtins, aliasManager, labelManager);
+        builtins.SetStrategy(strategy);
 
-    var result = await strategy.ExecuteAsync(command);
+        var result = await strategy.ExecuteAsync(command);
 
-    DisplayResult(result, theme);
+        DisplayResult(result, theme);
 
-    Environment.Exit(result.Error is null ? 0 : 1);
+        return result.Error is null ? 0 : 1;
+    }
+    finally
+    {
+        theme.EnsureDefaultFile();
+    }
 }
 
 static async Task RunReplAsync(JitzuOptions options)
 {
+    StartupProfiler.Mark("repl-entry");
     // Initialize session and components
     var persist = options.Persist;
     var history = new HistoryManager(persist);
     var aliasManager = new AliasManager(persist);
-    var themeTask = ThemeConfig.LoadAsync();
-    var sessionTask = ShellSession.CreateAsync();
-    var historyTask = history.InitialiseAsync();
-    var aliasTask = aliasManager.InitialiseAsync();
-    await Task.WhenAll(themeTask, sessionTask, historyTask, aliasTask);
-    var theme = await themeTask;
-    var session = await sessionTask;
+    var theme = ThemeConfig.Load(options.Config);
+    try
+    {
+    var session = new ShellSession();
+    history.Initialise();
+    aliasManager.Initialise();
+    if (history.PersistenceWarning is { } historyWarning)
+        Console.Error.WriteLine($"Warning: history persistence disabled: {historyWarning}");
+    if (aliasManager.PersistenceWarning is { } aliasWarning)
+        Console.Error.WriteLine($"Warning: alias persistence disabled: {aliasWarning}");
+    StartupProfiler.Mark("state-loaded");
     var labelManager = new LabelManager();
     var builtins = new BuiltinCommands(session, theme, aliasManager, labelManager, history);
     var strategy = new ExecutionStrategy(session, builtins, aliasManager, labelManager);
     builtins.SetStrategy(strategy);
-    var completionManager = new CompletionManager(session, builtins, labelManager);
-    var userProfilePath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    StartupProfiler.Mark("commands-registered");
+    var userProfilePath = GetUserProfilePath();
+    var completionManager = new CompletionManager(session, builtins, labelManager, userProfilePath);
 
     var readLine = new ReadLine(history, theme, completionManager.GetCompletions,
         prediction => HistoryPredictionFilter.IsValid(prediction, Directory.GetCurrentDirectory()),
@@ -216,16 +231,23 @@ static async Task RunReplAsync(JitzuOptions options)
 
     // Load config file (~/.jitzu/config.jz) like .bashrc
     var configPath = Path.Combine(userProfilePath, ".jitzu", "config.jz");
-    if (File.Exists(configPath))
+    if (options.Config && File.Exists(configPath))
     {
         aliasManager.BeginSaveBatch();
         try
         {
-            var configLines = await File.ReadAllLinesAsync(configPath);
+            // Config must be fully applied before the first prompt. It is a small local
+            // file, so synchronous reading avoids async I/O setup on the critical path.
+            var configLines = Jitzu.Shell.Infrastructure.StartupFileReader.ReadAllLines(
+                configPath, Jitzu.Shell.Infrastructure.StartupFileReader.ConfigMaxBytes);
             foreach (var line in configLines)
             {
                 if (!string.IsNullOrWhiteSpace(line) && !line.TrimStart().StartsWith("//"))
+                {
                     await strategy.ExecuteAsync(line);
+                    if (builtins.ExitRequested)
+                        return;
+                }
             }
         }
         catch (Exception ex)
@@ -234,9 +256,17 @@ static async Task RunReplAsync(JitzuOptions options)
         }
         finally
         {
-            await aliasManager.EndSaveBatchAsync();
+            try
+            {
+                await aliasManager.EndSaveBatchAsync();
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException)
+            {
+                Console.Error.WriteLine($"Warning: aliases remain read-only: {ex.Message}");
+            }
         }
     }
+    StartupProfiler.Mark("config-loaded");
 
     // Display welcome banner
     if (options.Splash)
@@ -274,6 +304,7 @@ static async Task RunReplAsync(JitzuOptions options)
 
             if (!isInteractive)
             {
+                StartupProfiler.Mark("input-ready");
                 line = Console.ReadLine();
                 if (line is null)
                     return;
@@ -354,28 +385,51 @@ static async Task RunReplAsync(JitzuOptions options)
                 line = readLine.Read(prompt);
             }
 
-            if (line is "exit")
+            StartupProfiler.Mark("input-accepted");
+
+            if (line.Trim() is "exit" or "quit")
                 return;
 
             if (string.IsNullOrWhiteSpace(line))
                 continue;
 
-            if (isInteractive)
-                await history.WriteAsync(line);
+            if (isInteractive && history.PersistenceWarning is null)
+            {
+                try
+                {
+                    if (persist)
+                        await history.WriteAsync(line);
+                    else
+                        history.Record(line);
+                }
+                catch (Exception ex) when (ex is IOException or InvalidOperationException)
+                {
+                    Console.Error.WriteLine($"Warning: history is now read-only: {ex.Message}");
+                }
+            }
 
             var sw = Stopwatch.StartNew();
             var result = await strategy.ExecuteAsync(line);
             sw.Stop();
 
+            if (builtins.ExitRequested)
+                return;
+
             lastCommandDuration = sw.Elapsed;
             lastCommandSuccess = result.Error is null;
 
             DisplayResult(result, theme);
+            StartupProfiler.Mark("first-result-displayed");
         }
         catch (Exception ex)
         {
             Console.WriteLine($"{theme["error"]}Unexpected error: {ex.Message}{ThemeConfig.Reset}");
         }
+    }
+    }
+    finally
+    {
+        theme.EnsureDefaultFile();
     }
 }
 
@@ -389,7 +443,7 @@ static async Task HandleElevatedEntry(JitzuOptions options)
         if (!SudoCommand.AttachToParentConsole(parentPid))
         {
             Console.Error.WriteLine("sudo: failed to attach to parent console");
-            Environment.Exit(1);
+            Environment.ExitCode = 1;
             return;
         }
     }
@@ -397,19 +451,26 @@ static async Task HandleElevatedEntry(JitzuOptions options)
     if (options.SudoExec is { } command)
     {
         // Mode 1: Run single command elevated, then exit
-        var theme = await ThemeConfig.LoadAsync();
-        var session = await ShellSession.CreateAsync();
-        var aliasManager = new AliasManager(options.Persist);
-        await aliasManager.InitialiseAsync();
-        var labelManager = new LabelManager();
-        var builtins = new BuiltinCommands(session, theme, aliasManager, labelManager);
-        var strategy = new ExecutionStrategy(session, builtins, aliasManager, labelManager);
-        builtins.SetStrategy(strategy);
+        var theme = ThemeConfig.Load(options.Config);
+        try
+        {
+            var session = new ShellSession();
+            var aliasManager = new AliasManager(options.Persist);
+            aliasManager.Initialise();
+            var labelManager = new LabelManager();
+            var builtins = new BuiltinCommands(session, theme, aliasManager, labelManager);
+            var strategy = new ExecutionStrategy(session, builtins, aliasManager, labelManager);
+            builtins.SetStrategy(strategy);
 
-        var result = await strategy.ExecuteAsync(command);
-        DisplayResult(result, theme);
+            var result = await strategy.ExecuteAsync(command);
+            DisplayResult(result, theme);
 
-        Environment.Exit(result.Error is null ? 0 : 1);
+            Environment.ExitCode = result.Error is null ? 0 : 1;
+        }
+        finally
+        {
+            theme.EnsureDefaultFile();
+        }
     }
     else
     {
@@ -481,16 +542,21 @@ static void CleanupOldBinary()
         var processPath = Environment.ProcessPath;
         if (processPath is null) return;
 
-        foreach (var oldPath in Jitzu.Shell.Infrastructure.Update.SelfUpdater.GetOldPathsToClean(processPath))
-        {
-            if (File.Exists(oldPath))
-                File.Delete(oldPath);
-        }
+        Jitzu.Shell.Infrastructure.Update.SelfUpdater.CleanupOldBinaries(processPath);
     }
     catch
     {
         // Best effort — ignore errors
     }
+}
+
+static string GetUserProfilePath()
+{
+    var environmentPath = Environment.GetEnvironmentVariable(
+        OperatingSystem.IsWindows() ? "USERPROFILE" : "HOME");
+    return string.IsNullOrWhiteSpace(environmentPath)
+        ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+        : environmentPath;
 }
 
 /// <summary>

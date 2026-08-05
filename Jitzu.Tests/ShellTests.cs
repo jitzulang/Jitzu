@@ -190,19 +190,60 @@ public class ShellTests
         output.ShouldNotContain("after");
     }
 
+    [Test]
+    public async Task CommandMode_ExitStopsTheRemainingChain()
+    {
+        var marker = Path.Combine(Path.GetTempPath(), $"jitzu-exit-chain-{Guid.NewGuid():N}");
+        try
+        {
+            var (_, exitCode) = await RunCommandModeAsync($"exit; touch \"{marker}\"");
+
+            exitCode.ShouldBe(0);
+            File.Exists(marker).ShouldBeFalse();
+        }
+        finally { File.Delete(marker); }
+    }
+
+    [Test]
+    public async Task PipedInput_AliasedQuitStopsTheRemainingChainAndSession()
+    {
+        var marker = Path.Combine(Path.GetTempPath(), $"jitzu-exit-pipe-{Guid.NewGuid():N}");
+        try
+        {
+            var (output, exitCode) = await RunPipedAsync(
+                $"alias done=quit\ndone; touch \"{marker}\"\necho SHOULD_NOT_RUN\n");
+
+            exitCode.ShouldBe(0);
+            File.Exists(marker).ShouldBeFalse();
+            output.ShouldNotContain("SHOULD_NOT_RUN");
+        }
+        finally { File.Delete(marker); }
+    }
+
+    private static async Task<(string output, int exitCode)> RunCommandModeAsync(string command)
+    {
+        var startInfo = CreateRedirectedStartInfo();
+        startInfo.ArgumentList.Add("--no-persist");
+        startInfo.ArgumentList.Add("--no-splash");
+        startInfo.ArgumentList.Add("--no-config");
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add(command);
+        using var process = Process.Start(startInfo)!;
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var error = await errorTask;
+        if (!string.IsNullOrWhiteSpace(error))
+            throw new Exception($"Shell error: {error}");
+        return (await outputTask, process.ExitCode);
+    }
+
     private static async Task<(string output, int exitCode)> RunPipedAsync(string stdin)
     {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = ShellTestHarness.GetShellPath(),
-            Arguments = "--no-persist --no-splash",
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
-        };
+        var startInfo = CreateRedirectedStartInfo();
+        startInfo.ArgumentList.Add("--no-persist");
+        startInfo.ArgumentList.Add("--no-splash");
+        startInfo.ArgumentList.Add("--no-config");
 
         using var process = Process.Start(startInfo)!;
 
@@ -220,4 +261,15 @@ public class ShellTests
 
         return (output, process.ExitCode);
     }
+
+    private static ProcessStartInfo CreateRedirectedStartInfo() => new()
+    {
+            FileName = ShellTestHarness.GetShellPath(),
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
+    };
 }

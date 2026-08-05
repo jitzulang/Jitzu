@@ -1,0 +1,54 @@
+{
+  "SchemaVersion": 3,
+  "Artifact": {
+    "Commit": "aa8f70f",
+    "CommitSource": "caller-supplied",
+    "SizeBytes": 92284423,
+    "Sha256": "5E8DC92F0A8BE267D6FAF31C1F0B379518C49613BF10E3507552E2851317B371",
+    "EmbeddedProductVersion": "0.0.0-dev\u002Baa8f70f2415065f24043f3903bdf6fd8bfa8a34c",
+    "CommitMatchesEmbeddedProductVersion": true
+  },
+  "SourceSha256": "9454F3337FD34CA4E3097A9108F4FA0A3C8CF1A4372C60AA1D81428BD8853685",
+  "SourceLengthBytes": 602046,
+  "Runtime": {
+    "runtimeEvents": 526,
+    "firstRuntimeMs": 6.0546,
+    "lastRuntimeMs": 104.3573,
+    "RuntimeStart": {
+      "Count": 1,
+      "FirstMs": 6.0546,
+      "LastMs": 6.0546
+    },
+    "Jit": {
+      "Count": 180,
+      "FirstMs": 23.7499,
+      "LastMs": 104.1167
+    },
+    "Modules": {
+      "Count": 18,
+      "FirstMs": 16.0126,
+      "LastMs": 83.6003
+    },
+    "Assemblies": {
+      "Count": 18,
+      "FirstMs": 15.9969,
+      "LastMs": 83.5953
+    }
+  },
+  "Phases": {
+    "aliases-loaded": 85.5506,
+    "commands-registered": 90.8884,
+    "config-loaded": 92.6247,
+    "history-loaded": 85.1094,
+    "input-accepted": 97.9722,
+    "input-ready": 97.5581,
+    "managed-entry": 60.3071,
+    "options-parsed": 75.6768,
+    "repl-entry": 81.77,
+    "state-loaded": 85.7051,
+    "theme-loaded": 84.1958
+  },
+  "RuntimeStartToManagedEntryMs": 54.2525,
+  "ClockScope": "All reported timings use the EventPipe session clock. Startup suspension makes process-launch to RuntimeStart unsuitable for production timing.",
+  "Privacy": "Only counts, relative timestamps, known Jitzu phase names, and source digest are retained."
+}

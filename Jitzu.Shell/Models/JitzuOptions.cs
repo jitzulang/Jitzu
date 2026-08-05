@@ -33,6 +33,9 @@ public partial class JitzuOptions
     [Arg(Long = "persist", Negation = true, Help = "Disable reading/writing history and alias files")]
     public bool Persist { get; init; } = true;
 
+    [Arg(Long = "config", Negation = true, Help = "Disable loading ~/.jitzu/config.jz")]
+    public bool Config { get; init; } = true;
+
     // Interpreter options
     [Arg(Short = 'd', Long = "debug")]
     public bool Debug { get; init; }

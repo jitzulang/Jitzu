@@ -212,6 +212,8 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
                 continue;
 
             lastResult = await ExpandAndExecuteAsync(command);
+            if (builtins.ExitRequested)
+                return lastResult;
             var success = lastResult.Error == null;
 
             switch (op)
@@ -1417,6 +1419,8 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
                 if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith("//"))
                     continue;
                 lastResult = await ExecuteAsync(line);
+                if (builtins.ExitRequested)
+                    break;
             }
 
             return lastResult;

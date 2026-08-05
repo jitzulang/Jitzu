@@ -1,0 +1,22 @@
+{
+  "SchemaVersion": 1,
+  "GeneratedUtc": "2026-08-05T15:31:22.7034635+00:00",
+  "Failure": "timeout",
+  "Artifact": {
+    "Label": "candidate",
+    "SizeBytes": 92280327,
+    "Sha256": "5E27C99049DB1131AA6857D32F66EA41C55E5CCE68DEF4ADC25A84C71AF810B7",
+    "Commit": "29c3ee0"
+  },
+  "warmup": false,
+  "order": 0,
+  "TimeoutSeconds": 0.001,
+  "bytes": 0,
+  "promptObserved": false,
+  "commandSent": false,
+  "markerCount": 0,
+  "processTreeTerminated": true,
+  "SdkVersion": "10.0.302",
+  "ReadinessPolicy": "external-prompt",
+  "Privacy": "No command line, paths, environment, terminal content, user, or machine name are retained."
+}

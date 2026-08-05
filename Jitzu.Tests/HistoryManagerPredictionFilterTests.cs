@@ -8,7 +8,7 @@ public class HistoryManagerPredictionFilterTests
     private static async Task<HistoryManager> CreateWithHistory(params string[] commands)
     {
         var manager = new HistoryManager(persist: false);
-        await manager.InitialiseAsync();
+        manager.Initialise();
         foreach (var cmd in commands)
             await manager.WriteAsync(cmd);
         return manager;

@@ -74,4 +74,70 @@ public sealed class SelfUpdaterTests : IDisposable
 
         oldPaths.ShouldBeEmpty();
     }
+
+    [Test]
+    public async Task GetOldPathsToClean_FindsNumberedOrphansAcrossGaps()
+    {
+        var currentPath = Path.Combine(_tempDir, "jz.exe");
+        await File.WriteAllTextAsync(currentPath + ".old.3", "old-three");
+        await File.WriteAllTextAsync(currentPath + ".old.8", "old-eight");
+        await File.WriteAllTextAsync(currentPath + ".old.invalid", "unrelated");
+
+        SelfUpdater.GetOldPathsToClean(currentPath).ToArray().ShouldBe([
+            currentPath + ".old.3",
+            currentPath + ".old.8"
+        ]);
+    }
+
+    [Test]
+    public async Task ReplaceWindowsBinary_RollsBackWhenInstallMoveFails()
+    {
+        var currentPath = Path.Combine(_tempDir, "jz.exe");
+        var newPath = Path.Combine(_tempDir, "download.exe");
+        await File.WriteAllTextAsync(currentPath, "original");
+        await File.WriteAllTextAsync(newPath, "replacement");
+
+        Should.Throw<InvalidOperationException>(() =>
+            SelfUpdater.ReplaceWindowsBinary(currentPath, newPath,
+                () => throw new InvalidOperationException("injected install failure")));
+
+        (await File.ReadAllTextAsync(currentPath)).ShouldBe("original");
+        Directory.GetFiles(_tempDir, "jz.exe.old*").ShouldBeEmpty();
+        Directory.GetFiles(_tempDir, ".jz-update-*.tmp").ShouldBeEmpty();
+    }
+
+    [Test]
+    public async Task ReplaceWindowsBinary_RetainsOldCopyWhenRollbackFails()
+    {
+        var currentPath = Path.Combine(_tempDir, "jz.exe");
+        var newPath = Path.Combine(_tempDir, "download.exe");
+        await File.WriteAllTextAsync(currentPath, "original");
+        await File.WriteAllTextAsync(newPath, "replacement");
+
+        var error = Should.Throw<AggregateException>(() =>
+            SelfUpdater.ReplaceWindowsBinary(currentPath, newPath,
+                afterCurrentMoved: () => throw new InvalidOperationException("injected install failure"),
+                beforeRollback: () => File.WriteAllText(currentPath, "rollback blocker")));
+
+        error.InnerExceptions.Count.ShouldBe(2);
+        (await File.ReadAllTextAsync(currentPath)).ShouldBe("rollback blocker");
+        var oldPath = Directory.GetFiles(_tempDir, "jz.exe.old*").ShouldHaveSingleItem();
+        (await File.ReadAllTextAsync(oldPath)).ShouldBe("original");
+        Directory.GetFiles(_tempDir, ".jz-update-*.tmp").ShouldBeEmpty();
+    }
+
+    [Test]
+    public async Task CleanupOldBinaries_RemovesAllRecognizedOrphans()
+    {
+        var currentPath = Path.Combine(_tempDir, "jz.exe");
+        await File.WriteAllTextAsync(currentPath + ".old", "old");
+        await File.WriteAllTextAsync(currentPath + ".old.4", "old-four");
+        await File.WriteAllTextAsync(currentPath + ".old.keep", "unrelated");
+
+        SelfUpdater.CleanupOldBinaries(currentPath);
+
+        File.Exists(currentPath + ".old").ShouldBeFalse();
+        File.Exists(currentPath + ".old.4").ShouldBeFalse();
+        File.Exists(currentPath + ".old.keep").ShouldBeTrue();
+    }
 }

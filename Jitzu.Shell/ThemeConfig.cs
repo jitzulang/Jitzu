@@ -1,5 +1,8 @@
-using System.Collections.Frozen;
+using System.Collections.Concurrent;
+using System.Text;
 using System.Text.Json;
+using Jitzu.Shell.Infrastructure;
+using Jitzu.Shell.Infrastructure.Logging;
 
 namespace Jitzu.Shell;
 
@@ -13,14 +16,9 @@ public sealed class ThemeConfig
     public const string Bold = "\e[1m";
     public const string Dim = "\e[2m";
 
-    private static readonly string ConfigDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".jitzu");
-
-    private static readonly string ConfigPath = Path.Combine(ConfigDir, "colours.json");
-
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
-    private static readonly FrozenDictionary<string, string> Defaults = new Dictionary<string, string>
+    private static readonly IReadOnlyDictionary<string, string> Defaults = new Dictionary<string, string>
     {
         ["syntax.command"]    = "#87af87",
         ["syntax.keyword"]    = "#87afd7",
@@ -64,48 +62,94 @@ public sealed class ThemeConfig
 
         ["dropdown.gutter"]   = "#404040",
         ["dropdown.status"]   = "#5f87af",
-    }.ToFrozenDictionary();
+    };
 
-    private readonly FrozenDictionary<string, string> _colors;
+    private readonly IReadOnlyDictionary<string, string> _overrides;
+    private readonly ConcurrentDictionary<string, string> _resolved = new();
+    private readonly string? _missingDefaultPath;
 
-    private ThemeConfig(FrozenDictionary<string, string> colors) => _colors = colors;
+    private ThemeConfig(IReadOnlyDictionary<string, string> overrides, string? missingDefaultPath = null) =>
+        (_overrides, _missingDefaultPath) = (overrides, missingDefaultPath);
 
     /// <summary>
     /// Creates a ThemeConfig with default ANSI colors. For tests that need a theme without filesystem access.
     /// </summary>
-    internal static ThemeConfig CreateDefault() => new(BuildAnsiDefaults().ToFrozenDictionary());
+    internal static ThemeConfig CreateDefault() => new(new Dictionary<string, string>());
 
     /// <summary>
     /// Gets the ANSI escape code for a semantic color key.
     /// Returns empty string if the key is unknown.
     /// </summary>
-    public string this[string key] => _colors.GetValueOrDefault(key, "");
-
-    public static async Task<ThemeConfig> LoadAsync()
+    public string this[string key]
     {
-        var colours = BuildAnsiDefaults();
-
-        if (File.Exists(ConfigPath))
-            await ApplyUserOverridesAsync(colours);
-        else
-            await WriteDefaultConfigAsync();
-
-        return new ThemeConfig(colours.ToFrozenDictionary());
+        get
+        {
+            if (_overrides.TryGetValue(key, out var value)) return value;
+            if (!Defaults.TryGetValue(key, out var hex)) return "";
+            return _resolved.GetOrAdd(key, static (_, state) => HexToAnsi(state.Hex, state.Background),
+                (Hex: hex, Background: key.EndsWith(".bg", StringComparison.Ordinal)));
+        }
     }
 
-    private static Dictionary<string, string> BuildAnsiDefaults()
+    public static ThemeConfig Load(bool loadUserConfig = true, string? userProfilePath = null)
     {
-        var result = new Dictionary<string, string>(Defaults.Count);
-        foreach (var (key, hex) in Defaults)
-            result[key] = HexToAnsi(hex, key.EndsWith(".bg"));
-        return result;
+        var colours = new Dictionary<string, string>();
+        string? missingDefaultPath = null;
+
+        if (loadUserConfig)
+        {
+            var configPath = Path.Combine(userProfilePath
+                                          ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".jitzu", "colours.json");
+            if (File.Exists(configPath))
+                ApplyUserOverridesFromFile(configPath, colours);
+            else
+                missingDefaultPath = configPath;
+        }
+
+        var theme = new ThemeConfig(colours, missingDefaultPath);
+        StartupProfiler.Mark("theme-loaded");
+        return theme;
     }
 
-    private static async Task ApplyUserOverridesAsync(Dictionary<string, string> colours)
+    /// <summary>
+    /// Restores first-run behaviour without putting directory and file creation on the
+    /// first-prompt path. CreateNew preserves a file written by another process/session.
+    /// </summary>
+    internal void EnsureDefaultFile()
+    {
+        if (_missingDefaultPath is null || File.Exists(_missingDefaultPath))
+            return;
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_missingDefaultPath)!);
+            using var stream = new FileStream(_missingDefaultPath, FileMode.CreateNew, FileAccess.Write,
+                FileShare.Read, 4096, FileOptions.WriteThrough);
+            using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            writer.Write(BuildDefaultJson());
+            writer.Flush();
+            stream.Flush(flushToDisk: true);
+        }
+        catch (IOException)
+        {
+            // Another process may have created it, or persistence may be unavailable.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Non-critical — the in-memory default theme remains usable.
+        }
+        catch (System.Security.SecurityException)
+        {
+            // Non-critical — the in-memory default theme remains usable.
+        }
+    }
+
+    private static void ApplyUserOverridesFromFile(string configPath, Dictionary<string, string> colours)
     {
         try
         {
-            var json = await File.ReadAllBytesAsync(ConfigPath);
+            var json = StartupFileReader.ReadAllBytes(configPath, StartupFileReader.ThemeMaxBytes);
             ApplyUserOverrides(json, colours);
         }
         catch
@@ -158,19 +202,6 @@ public sealed class ThemeConfig
                     propertyName = null;
                     break;
             }
-        }
-    }
-
-    private static async Task WriteDefaultConfigAsync()
-    {
-        try
-        {
-            Directory.CreateDirectory(ConfigDir);
-            await File.WriteAllTextAsync(ConfigPath, BuildDefaultJson());
-        }
-        catch
-        {
-            // Non-critical — continue with in-memory defaults
         }
     }
 

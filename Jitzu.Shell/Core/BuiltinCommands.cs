@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Collections.Frozen;
 using Jitzu.Shell.Core.Commands;
 
 namespace Jitzu.Shell.Core;
@@ -9,13 +10,20 @@ namespace Jitzu.Shell.Core;
 public class BuiltinCommands
 {
     private readonly Dictionary<string, IBuiltinCommand> _commandInstances = new();
-    private readonly Dictionary<string, Func<ReadOnlyMemory<string>, Task<ShellResult>>> _commands;
+    private readonly FrozenSet<string> _commands;
+    private static readonly string[] CommandNamesCore =
+    [
+        "cd", "exit", "quit", "clear", "help", "reset", "vars", "types", "functions",
+        "alias", "unalias", "aliases", "label", "unlabel", "labels", "mkdir", "cat", "pwd",
+        "echo", "touch", "rm", "mv", "cp", "history", "env", "head", "tail", "export", "unset",
+        "grep", "wc", "sort", "uniq", "find", "diff", "time", "watch", "more", "less", "jobs",
+        "fg", "bg", "wget", "kill", "killall", "tee", "ln", "stat", "chmod", "unblock", "whoami",
+        "who", "hostname", "uptime", "sleep", "yes", "basename", "dirname", "du", "df", "tr", "cut",
+        "seq", "rev", "tac", "paste", "date", "mktemp", "true", "false", "monitor", "sudo", "where",
+        "neofetch", "upgrade", "path", "view"
+    ];
     private readonly CommandContext _context;
-    private readonly SudoCommand _sudo;
-
-    // Command instances that need special handling for piped input
-    private readonly MoreCommand _moreCommand;
-    private readonly TeeCommand _teeCommand;
+    private SudoCommand? _sudo;
 
     /// <summary>
     /// Set after construction to break circular dependency (ExecutionStrategy → BuiltinCommands → ExecutionStrategy).
@@ -27,185 +35,29 @@ public class BuiltinCommands
     {
         _context = new CommandContext(session, theme, aliasManager, labelManager, historyManager);
         _context.BuiltinCommands = this;
-        _sudo = new SudoCommand(historyManager);
 
-        // Instantiate all command classes
-        var cdCommand = new CdCommand(_context);
-        var exitCommand = new ExitCommand(_context);
-        var clearCommand = new ClearCommand(_context);
-        var helpCommand = new HelpCommand(_context);
-        var resetCommand = new ResetCommand(_context);
-        var showVariablesCommand = new ShowVariablesCommand(_context);
-        var showTypesCommand = new ShowTypesCommand(_context);
-        var showFunctionsCommand = new ShowFunctionsCommand(_context);
-        var aliasCommand = new AliasCommand(_context);
-        var unaliasCommand = new UnaliasCommand(_context);
-        var listAliasesCommand = new ListAliasesCommand(_context);
-        var labelCommand = new LabelCommand(_context);
-        var unlabelCommand = new UnlabelCommand(_context);
-        var listLabelsCommand = new ListLabelsCommand(_context);
-        var mkdirCommand = new MkdirCommand(_context);
-        var catCommand = new CatCommand(_context);
-        var pwdCommand = new PwdCommand(_context);
-        var echoCommand = new EchoCommand(_context);
-        var touchCommand = new TouchCommand(_context);
-        var rmCommand = new RmCommand(_context);
-        var mvCommand = new MvCommand(_context);
-        var cpCommand = new CpCommand(_context);
-        var historyCommand = new HistoryCommand(_context);
-        var envCommand = new EnvCommand(_context);
-        var headCommand = new HeadCommand(_context);
-        var tailCommand = new TailCommand(_context);
-        var exportCommand = new ExportCommand(_context);
-        var unsetCommand = new UnsetCommand(_context);
-        var grepCommand = new GrepCommand(_context);
-        var wcCommand = new WcCommand(_context);
-        var sortCommand = new SortCommand(_context);
-        var uniqCommand = new UniqCommand(_context);
-        var findCommand = new FindCommand(_context);
-        var diffCommand = new DiffCommand(_context);
-        var timeCommand = new TimeCommand(_context);
-        var watchCommand = new WatchCommand(_context);
-        _moreCommand = new MoreCommand(_context);
-        var jobsCommand = new JobsCommand(_context);
-        var fgCommand = new FgCommand(_context);
-        var bgCommand = new BgCommand(_context);
-        var wgetCommand = new WgetCommand(_context);
-        var killCommand = new KillCommand(_context);
-        var killAllCommand = new KillAllCommand(_context);
-        _teeCommand = new TeeCommand(_context);
-        var lnCommand = new LnCommand(_context);
-        var statCommand = new StatCommand(_context);
-        var chmodCommand = new ChmodCommand(_context);
-        var unblockCommand = new UnblockCommand(_context);
-        var whoamiCommand = new WhoamiCommand(_context);
-        var whoCommand = new WhoCommand(_context);
-        var hostnameCommand = new HostnameCommand(_context);
-        var uptimeCommand = new UptimeCommand(_context);
-        var sleepCommand = new SleepCommand(_context);
-        var yesCommand = new YesCommand(_context);
-        var basenameCommand = new BasenameCommand(_context);
-        var dirnameCommand = new DirnameCommand(_context);
-        var duCommand = new DuCommand(_context);
-        var dfCommand = new DfCommand(_context);
-        var trCommand = new TrCommand(_context);
-        var cutCommand = new CutCommand(_context);
-        var seqCommand = new SeqCommand(_context);
-        var revCommand = new RevCommand(_context);
-        var tacCommand = new TacCommand(_context);
-        var pasteCommand = new PasteCommand(_context);
-        var dateCommand = new DateCommand(_context);
-        var mktempCommand = new MktempCommand(_context);
-        var trueCommand = new TrueCommand(_context);
-        var falseCommand = new FalseCommand(_context);
-        var monitorCommand = new MonitorCommand(_context);
-        var lsCommand = new LsCommand(_context);
-        var whereCommand = new WhereCommand(_context);
-        var neofetchCommand = new NeofetchCommand(_context);
-        var upgradeCommand = new UpgradeCommand(_context);
-        var pathCommand = new PathCommand(_context);
-        var viewCommand = new ViewCommand(_context);
-
-        // Register commands in dictionary
-        _commands = new()
-        {
-            ["cd"] = cdCommand.ExecuteAsync,
-            ["exit"] = exitCommand.ExecuteAsync,
-            ["quit"] = exitCommand.ExecuteAsync,
-            ["clear"] = clearCommand.ExecuteAsync,
-            ["help"] = helpCommand.ExecuteAsync,
-            ["reset"] = resetCommand.ExecuteAsync,
-            ["vars"] = showVariablesCommand.ExecuteAsync,
-            ["types"] = showTypesCommand.ExecuteAsync,
-            ["functions"] = showFunctionsCommand.ExecuteAsync,
-            ["alias"] = aliasCommand.ExecuteAsync,
-            ["unalias"] = unaliasCommand.ExecuteAsync,
-            ["aliases"] = listAliasesCommand.ExecuteAsync,
-            ["label"] = labelCommand.ExecuteAsync,
-            ["unlabel"] = unlabelCommand.ExecuteAsync,
-            ["labels"] = listLabelsCommand.ExecuteAsync,
-            ["mkdir"] = mkdirCommand.ExecuteAsync,
-            ["cat"] = catCommand.ExecuteAsync,
-            ["pwd"] = pwdCommand.ExecuteAsync,
-            ["echo"] = echoCommand.ExecuteAsync,
-            ["touch"] = touchCommand.ExecuteAsync,
-            ["rm"] = rmCommand.ExecuteAsync,
-            ["mv"] = mvCommand.ExecuteAsync,
-            ["cp"] = cpCommand.ExecuteAsync,
-            ["history"] = historyCommand.ExecuteAsync,
-            ["env"] = envCommand.ExecuteAsync,
-            ["head"] = headCommand.ExecuteAsync,
-            ["tail"] = tailCommand.ExecuteAsync,
-            ["export"] = exportCommand.ExecuteAsync,
-            ["unset"] = unsetCommand.ExecuteAsync,
-            ["grep"] = grepCommand.ExecuteAsync,
-            ["wc"] = wcCommand.ExecuteAsync,
-            ["sort"] = sortCommand.ExecuteAsync,
-            ["uniq"] = uniqCommand.ExecuteAsync,
-            ["find"] = findCommand.ExecuteAsync,
-            ["diff"] = diffCommand.ExecuteAsync,
-            ["time"] = timeCommand.ExecuteAsync,
-            ["watch"] = watchCommand.ExecuteAsync,
-            ["more"] = _moreCommand.ExecuteAsync,
-            ["less"] = _moreCommand.ExecuteAsync,
-            ["jobs"] = jobsCommand.ExecuteAsync,
-            ["fg"] = fgCommand.ExecuteAsync,
-            ["bg"] = bgCommand.ExecuteAsync,
-            ["wget"] = wgetCommand.ExecuteAsync,
-            ["kill"] = killCommand.ExecuteAsync,
-            ["killall"] = killAllCommand.ExecuteAsync,
-            ["tee"] = _teeCommand.ExecuteAsync,
-            ["ln"] = lnCommand.ExecuteAsync,
-            ["stat"] = statCommand.ExecuteAsync,
-            ["chmod"] = chmodCommand.ExecuteAsync,
-            ["unblock"] = unblockCommand.ExecuteAsync,
-            ["whoami"] = whoamiCommand.ExecuteAsync,
-            ["who"] = whoCommand.ExecuteAsync,
-            ["hostname"] = hostnameCommand.ExecuteAsync,
-            ["uptime"] = uptimeCommand.ExecuteAsync,
-            ["sleep"] = sleepCommand.ExecuteAsync,
-            ["yes"] = yesCommand.ExecuteAsync,
-            ["basename"] = basenameCommand.ExecuteAsync,
-            ["dirname"] = dirnameCommand.ExecuteAsync,
-            ["du"] = duCommand.ExecuteAsync,
-            ["df"] = dfCommand.ExecuteAsync,
-            ["tr"] = trCommand.ExecuteAsync,
-            ["cut"] = cutCommand.ExecuteAsync,
-            ["seq"] = seqCommand.ExecuteAsync,
-            ["rev"] = revCommand.ExecuteAsync,
-            ["tac"] = tacCommand.ExecuteAsync,
-            ["paste"] = pasteCommand.ExecuteAsync,
-            ["date"] = dateCommand.ExecuteAsync,
-            ["mktemp"] = mktempCommand.ExecuteAsync,
-            ["true"] = trueCommand.ExecuteAsync,
-            ["false"] = falseCommand.ExecuteAsync,
-            ["monitor"] = monitorCommand.ExecuteAsync,
-            ["sudo"] = _sudo.ExecuteAsync,
-            ["where"] = whereCommand.ExecuteAsync,
-            ["neofetch"] = neofetchCommand.ExecuteAsync,
-            ["upgrade"] = upgradeCommand.ExecuteAsync,
-            ["path"] = pathCommand.ExecuteAsync,
-            ["view"] = viewCommand.ExecuteAsync
-        };
-
-        // Platform-specific: On Windows, use our built-in ls instead of external command
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            _commands["ls"] = lsCommand.ExecuteAsync;
+        _commands = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? CommandNamesCore.Append("ls").ToFrozenSet(StringComparer.Ordinal)
+            : CommandNamesCore.ToFrozenSet(StringComparer.Ordinal);
     }
 
-    public IReadOnlyCollection<string> CommandNames => _commands.Keys;
+    public IReadOnlyCollection<string> CommandNames => _commands;
+    public bool ExitRequested => _context.ExitRequested;
 
     public string? FindNearest(string lastWord)
     {
-        return _commands.FirstOrDefault(x => x.Key.StartsWith(lastWord, StringComparison.OrdinalIgnoreCase)).Key;
+        return _commands.FirstOrDefault(x => x.StartsWith(lastWord, StringComparison.OrdinalIgnoreCase));
     }
 
-    public bool IsBuiltin(string command) => _commands.ContainsKey(command);
+    public bool IsBuiltin(string command) => _commands.Contains(command);
 
     public async Task<ShellResult> ExecuteAsync(string command, ReadOnlyMemory<string> args)
     {
-        if (_commands.TryGetValue(command, out var handler))
-            return await handler(args);
+        if (command == "sudo")
+            return await GetOrCreateSudo().ExecuteAsync(args);
+
+        if (_commands.Contains(command))
+            return await GetOrCreate(command).ExecuteAsync(args);
 
         return new ShellResult(
             ResultType.Error,
@@ -217,10 +69,108 @@ public class BuiltinCommands
     /// <summary>
     /// Sets piped input for the 'more'/'less' pager command.
     /// </summary>
-    public void SetPagerInput(string input) => _moreCommand.SetPagerInput(input);
+    public void SetPagerInput(string input) => ((MoreCommand)GetOrCreate("more")).SetPagerInput(input);
 
     /// <summary>
     /// Sets piped input for the 'tee' command.
     /// </summary>
-    public void SetTeeInput(string input) => _teeCommand.SetTeeInput(input);
+    public void SetTeeInput(string input) => ((TeeCommand)GetOrCreate("tee")).SetTeeInput(input);
+
+    internal IBuiltinCommand GetOrCreate(string command)
+    {
+        lock (_commandInstances)
+        {
+            var key = command switch { "quit" => "exit", "less" => "more", _ => command };
+            if (_commandInstances.TryGetValue(key, out var instance))
+                return instance;
+
+            instance = key switch
+            {
+            "cd" => new CdCommand(_context),
+            "exit" => new ExitCommand(_context),
+            "clear" => new ClearCommand(_context),
+            "help" => new HelpCommand(_context),
+            "reset" => new ResetCommand(_context),
+            "vars" => new ShowVariablesCommand(_context),
+            "types" => new ShowTypesCommand(_context),
+            "functions" => new ShowFunctionsCommand(_context),
+            "alias" => new AliasCommand(_context),
+            "unalias" => new UnaliasCommand(_context),
+            "aliases" => new ListAliasesCommand(_context),
+            "label" => new LabelCommand(_context),
+            "unlabel" => new UnlabelCommand(_context),
+            "labels" => new ListLabelsCommand(_context),
+            "mkdir" => new MkdirCommand(_context),
+            "cat" => new CatCommand(_context),
+            "pwd" => new PwdCommand(_context),
+            "echo" => new EchoCommand(_context),
+            "touch" => new TouchCommand(_context),
+            "rm" => new RmCommand(_context),
+            "mv" => new MvCommand(_context),
+            "cp" => new CpCommand(_context),
+            "history" => new HistoryCommand(_context),
+            "env" => new EnvCommand(_context),
+            "head" => new HeadCommand(_context),
+            "tail" => new TailCommand(_context),
+            "export" => new ExportCommand(_context),
+            "unset" => new UnsetCommand(_context),
+            "grep" => new GrepCommand(_context),
+            "wc" => new WcCommand(_context),
+            "sort" => new SortCommand(_context),
+            "uniq" => new UniqCommand(_context),
+            "find" => new FindCommand(_context),
+            "diff" => new DiffCommand(_context),
+            "time" => new TimeCommand(_context),
+            "watch" => new WatchCommand(_context),
+            "more" => new MoreCommand(_context),
+            "jobs" => new JobsCommand(_context),
+            "fg" => new FgCommand(_context),
+            "bg" => new BgCommand(_context),
+            "wget" => new WgetCommand(_context),
+            "kill" => new KillCommand(_context),
+            "killall" => new KillAllCommand(_context),
+            "tee" => new TeeCommand(_context),
+            "ln" => new LnCommand(_context),
+            "stat" => new StatCommand(_context),
+            "chmod" => new ChmodCommand(_context),
+            "unblock" => new UnblockCommand(_context),
+            "whoami" => new WhoamiCommand(_context),
+            "who" => new WhoCommand(_context),
+            "hostname" => new HostnameCommand(_context),
+            "uptime" => new UptimeCommand(_context),
+            "sleep" => new SleepCommand(_context),
+            "yes" => new YesCommand(_context),
+            "basename" => new BasenameCommand(_context),
+            "dirname" => new DirnameCommand(_context),
+            "du" => new DuCommand(_context),
+            "df" => new DfCommand(_context),
+            "tr" => new TrCommand(_context),
+            "cut" => new CutCommand(_context),
+            "seq" => new SeqCommand(_context),
+            "rev" => new RevCommand(_context),
+            "tac" => new TacCommand(_context),
+            "paste" => new PasteCommand(_context),
+            "date" => new DateCommand(_context),
+            "mktemp" => new MktempCommand(_context),
+            "true" => new TrueCommand(_context),
+            "false" => new FalseCommand(_context),
+            "monitor" => new MonitorCommand(_context),
+            "ls" => new LsCommand(_context),
+            "where" => new WhereCommand(_context),
+            "neofetch" => new NeofetchCommand(_context),
+            "upgrade" => new UpgradeCommand(_context),
+            "path" => new PathCommand(_context),
+            "view" => new ViewCommand(_context),
+            _ => throw new InvalidOperationException($"Unknown builtin: {command}")
+            };
+            _commandInstances.Add(key, instance);
+            return instance;
+        }
+    }
+
+    private SudoCommand GetOrCreateSudo()
+    {
+        lock (_commandInstances)
+            return _sudo ??= new SudoCommand(_context.HistoryManager);
+    }
 }
