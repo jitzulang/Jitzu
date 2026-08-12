@@ -4,7 +4,7 @@ namespace Jitzu.Shell;
 /// Caches git repository information between prompt renders.
 /// Repo root is cached until the working directory changes.
 /// Branch is cached until .git/HEAD's modification time changes.
-/// Working-tree status refreshes in the background so prompt rendering never waits on git.
+/// Working-tree status is read afresh for every prompt.
 /// </summary>
 internal class GitStatusCache
 {
@@ -15,10 +15,6 @@ internal class GitStatusCache
     private string? _cachedHeadPath;
     private DateTime _cachedHeadWriteTime;
     private string? _cachedBranch;
-    private readonly object _statusLock = new();
-    private string? _statusRepoPath;
-    private GitStatus _status;
-    private Task? _statusRefresh;
 
     /// <summary>
     /// Returns the cached git repo root, only recomputing when the working directory changes.
@@ -88,35 +84,11 @@ internal class GitStatusCache
         }
     }
 
-    public GitStatus GetGitStatus(string gitRepoPath)
-    {
-        lock (_statusLock)
-        {
-            if (!string.Equals(_statusRepoPath, gitRepoPath, StringComparison.Ordinal))
-            {
-                _statusRepoPath = gitRepoPath;
-                _status = default;
-                _statusRefresh = null;
-            }
-
-            if (_statusRefresh is null || _statusRefresh.IsCompleted)
-                _statusRefresh = Task.Run(() => RefreshStatusAsync(gitRepoPath));
-
-            return _status;
-        }
-    }
-
-    private async Task RefreshStatusAsync(string gitRepoPath)
-    {
-        var status = await ReadGitStatusAsync(gitRepoPath).ConfigureAwait(false);
-        lock (_statusLock)
-        {
-            if (string.Equals(_statusRepoPath, gitRepoPath, StringComparison.Ordinal))
-                _status = status;
-        }
-    }
-
-    private static async Task<GitStatus> ReadGitStatusAsync(string gitRepoPath)
+    /// <summary>
+    /// Reads the current working-tree status. This deliberately isn't cached: commands can
+    /// change the index or working tree without changing HEAD, so every prompt needs a fresh read.
+    /// </summary>
+    public static async Task<GitStatus> GetGitStatusAsync(string gitRepoPath)
     {
         try
         {
