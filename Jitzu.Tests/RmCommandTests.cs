@@ -74,4 +74,115 @@ public class RmCommandTests : IDisposable
         result.Type.ShouldBe(ResultType.Jitzu);
         Directory.Exists(directory).ShouldBeFalse();
     }
+
+    [Test]
+    public async Task Rm_Interactive_RejectsAFile()
+    {
+        var file = Path.Combine(_tempDir, "keep.txt");
+        await File.WriteAllTextAsync(file, "data");
+        var cmd = CreateInteractiveCommand(_ => false);
+
+        var result = await cmd.ExecuteAsync(new[] { "-i", file }.AsMemory());
+
+        result.Type.ShouldBe(ResultType.Error);
+        result.Error!.Message.ShouldContain("can only be used with a directory");
+        File.Exists(file).ShouldBeTrue();
+    }
+
+    [Test]
+    public async Task Rm_Interactive_DeletesOnlySelectedFile()
+    {
+        var directory = Path.Combine(_tempDir, "tree");
+        Directory.CreateDirectory(directory);
+        var keep = Path.Combine(directory, "keep.txt");
+        var remove = Path.Combine(directory, "remove.txt");
+        await File.WriteAllTextAsync(keep, "keep");
+        await File.WriteAllTextAsync(remove, "remove");
+        var cmd = CreateInteractiveCommand(selection =>
+        {
+            selection.Move(2); // root, keep.txt, remove.txt
+            selection.Toggle();
+            return true;
+        });
+
+        var result = await cmd.ExecuteAsync(new[] { "-i", directory }.AsMemory());
+
+        result.Type.ShouldBe(ResultType.Jitzu);
+        File.Exists(keep).ShouldBeTrue();
+        File.Exists(remove).ShouldBeFalse();
+        Directory.Exists(directory).ShouldBeTrue();
+    }
+
+    [Test]
+    public async Task Rm_Interactive_SelectingFolderDeletesItsWholeSubtree()
+    {
+        var directory = Path.Combine(_tempDir, "tree");
+        var nested = Path.Combine(directory, "nested");
+        Directory.CreateDirectory(nested);
+        await File.WriteAllTextAsync(Path.Combine(nested, "child.txt"), "data");
+        await File.WriteAllTextAsync(Path.Combine(directory, "keep.txt"), "keep");
+        var cmd = CreateInteractiveCommand(selection =>
+        {
+            selection.Move(1); // directories sort before files
+            selection.Toggle();
+            return true;
+        });
+
+        var result = await cmd.ExecuteAsync(new[] { "--interactive", directory }.AsMemory());
+
+        result.Type.ShouldBe(ResultType.Jitzu);
+        Directory.Exists(nested).ShouldBeFalse();
+        File.Exists(Path.Combine(directory, "keep.txt")).ShouldBeTrue();
+    }
+
+    [Test]
+    public async Task Rm_Interactive_CancelDoesNotDeleteSelection()
+    {
+        var directory = Path.Combine(_tempDir, "tree");
+        Directory.CreateDirectory(directory);
+        var file = Path.Combine(directory, "keep.txt");
+        await File.WriteAllTextAsync(file, "keep");
+        var cmd = CreateInteractiveCommand(selection =>
+        {
+            selection.Move(1);
+            selection.Toggle();
+            return false;
+        });
+
+        var result = await cmd.ExecuteAsync(new[] { "-i", directory }.AsMemory());
+
+        result.Type.ShouldBe(ResultType.Jitzu);
+        File.Exists(file).ShouldBeTrue();
+    }
+
+    [Test]
+    public async Task Rm_Interactive_NestedDirectoriesStartCollapsedAndCanExpand()
+    {
+        var directory = Path.Combine(_tempDir, "tree");
+        var nested = Path.Combine(directory, "nested");
+        Directory.CreateDirectory(nested);
+        await File.WriteAllTextAsync(Path.Combine(nested, "child.txt"), "data");
+        var tree = RmTreeNode.Create(directory);
+        var selection = new RmTreeSelection(tree);
+
+        selection.VisibleNodes.Count.ShouldBe(2); // root and collapsed nested directory
+        selection.Move(1);
+        selection.Current.Name.ShouldBe("nested");
+        selection.Expand();
+        selection.VisibleNodes.Select(node => node.Name).ShouldContain("child.txt");
+        selection.Collapse();
+        selection.VisibleNodes.Count.ShouldBe(2);
+    }
+
+    private static RmCommand CreateInteractiveCommand(Func<RmTreeSelection, bool> select)
+    {
+        var context = new CommandContext(new ShellSession(), ThemeConfig.CreateDefault());
+        return new RmCommand(context, new FakeInteractiveConsole(select));
+    }
+
+    private sealed class FakeInteractiveConsole(Func<RmTreeSelection, bool> select) : IRmInteractiveConsole
+    {
+        public bool IsInteractive => true;
+        public bool Select(RmTreeSelection selection, string displayPath) => select(selection);
+    }
 }

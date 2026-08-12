@@ -22,7 +22,8 @@ Built-in Commands:
   echo [text]    - Print text
   touch [-d/-t] f - Create file or set timestamp
   mkdir [-cd] d  - Create a directory (-cd to enter it)
-  rm [-r] <path> - Remove file or directory
+  rm [-r/-f] path - Remove file or directory
+  rm -i <dir>     - Interactively select directory contents to remove
   mv <src> <dst> - Move or rename file/directory
   cp [-r] s d    - Copy file or directory
   which <cmd>    - Locate a command
