@@ -10,18 +10,11 @@ namespace Jitzu.Shell.Core;
 /// </summary>
 public class SudoCommand
 {
-    private readonly HistoryManager? _historyManager;
-
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool FreeConsole();
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool AttachConsole(uint dwProcessId);
-
-    public SudoCommand(HistoryManager? historyManager)
-    {
-        _historyManager = historyManager;
-    }
 
     public async Task<ShellResult> ExecuteAsync(ReadOnlyMemory<string> args)
     {
@@ -66,14 +59,6 @@ public class SudoCommand
                 case "-u":
                     return new ShellResult(ResultType.Error, null,
                         new Exception("sudo: -u (run as another user) is not supported on Windows"));
-
-                case "!!":
-                    var previousCommand = GetPreviousCommand();
-                    if (previousCommand == null)
-                        return new ShellResult(ResultType.Error, null,
-                            new Exception("sudo: no command in history"));
-                    Console.WriteLine($"sudo {previousCommand}");
-                    return RunElevatedCommand(previousCommand, preserveEnv);
 
                 default:
                     if (arg.StartsWith('-'))
@@ -186,14 +171,6 @@ public class SudoCommand
         using var identity = WindowsIdentity.GetCurrent();
         var principal = new WindowsPrincipal(identity);
         return principal.IsInRole(WindowsBuiltInRole.Administrator);
-    }
-
-    private string? GetPreviousCommand()
-    {
-        if (_historyManager == null || _historyManager.Count < 2)
-            return null;
-
-        return _historyManager[_historyManager.Count - 2];
     }
 
     private static string EscapeCommandArg(string command)

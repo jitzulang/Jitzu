@@ -117,7 +117,7 @@ Features:
   - Environment variable expansion ($VAR, ${VAR})
   - Multi-line input (unclosed braces continue on next line)
   - Tab completion for variables, functions, and types
-  - Command history (up/down arrows)
+  - Command recall (^a0 first argument, ^l last argument, ^p previous command)
   - Script execution: dotnet run -- script.jz
 
 Examples:

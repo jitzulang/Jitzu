@@ -171,6 +171,6 @@ public class BuiltinCommands
     private SudoCommand GetOrCreateSudo()
     {
         lock (_commandInstances)
-            return _sudo ??= new SudoCommand(_context.HistoryManager);
+            return _sudo ??= new SudoCommand();
     }
 }

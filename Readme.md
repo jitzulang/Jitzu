@@ -103,7 +103,7 @@ The interactive shell supports:
 - Job control (background jobs, `fg`, `bg`)
 - Glob expansion
 - Tab completion
-- Command history
+- Command recall (`^a0` inserts the first argument, `^l` the last, and `^p` the previous command)
 
 ```terminal
 $ jz

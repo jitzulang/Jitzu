@@ -387,11 +387,26 @@ static async Task RunReplAsync(JitzuOptions options)
 
             StartupProfiler.Mark("input-accepted");
 
-            if (line.Trim() is "exit" or "quit")
-                return;
-
             if (string.IsNullOrWhiteSpace(line))
                 continue;
+
+            if (isInteractive)
+            {
+                if (!HistoryExpansion.TryExpand(line, history, out var expandedLine, out var expansionError))
+                {
+                    Console.Error.WriteLine($"jz: {expansionError}");
+                    continue;
+                }
+
+                if (!string.Equals(line, expandedLine, StringComparison.Ordinal))
+                {
+                    line = expandedLine;
+                    Console.WriteLine(line);
+                }
+            }
+
+            if (line.Trim() is "exit" or "quit")
+                return;
 
             if (isInteractive && history.PersistenceWarning is null)
             {
