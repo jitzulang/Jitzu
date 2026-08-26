@@ -279,7 +279,7 @@ static async Task RunReplAsync(JitzuOptions options)
     var lastCommandDuration = TimeSpan.Zero;
     var user = Environment.UserName;
     var host = Environment.MachineName;
-    var gitCache = new GitStatusCache();
+    await using var gitCache = new GitStatusCache();
     var promptSb = new StringBuilder();
     var cachedPadding = "";
 
@@ -325,7 +325,10 @@ static async Task RunReplAsync(JitzuOptions options)
                 // Notify about completed background jobs
                 var jobNotice = strategy.CheckCompletedJobs();
                 if (jobNotice is not null)
+                {
+                    gitCache.InvalidateStatus();
                     Console.WriteLine(jobNotice);
+                }
 
                 var branchSuffix = "";
                 if (gitRepoRoot is not null)
@@ -424,7 +427,18 @@ static async Task RunReplAsync(JitzuOptions options)
             }
 
             var sw = Stopwatch.StartNew();
-            var result = await strategy.ExecuteAsync(line);
+            ShellResult result;
+            try
+            {
+                result = await strategy.ExecuteAsync(line);
+            }
+            finally
+            {
+                // Commands may change files, the index, or the current directory. Invalidate
+                // without waiting so the next prompt remains responsive; the cache owns the
+                // refresh task and publishes only the newest generation.
+                gitCache.InvalidateStatus();
+            }
             sw.Stop();
 
             if (builtins.ExitRequested)
