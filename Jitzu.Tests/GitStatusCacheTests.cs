@@ -1,5 +1,8 @@
 using System.Diagnostics;
+using System.Reflection;
 using Jitzu.Shell;
+using Jitzu.Shell.UI;
+using Jitzu.Shell.UI.PromptPlugins;
 using Shouldly;
 
 namespace Jitzu.Tests;
@@ -7,14 +10,16 @@ namespace Jitzu.Tests;
 public class GitStatusCacheTests
 {
     [Test]
-    public void PromptUsesNonBlockingGitStatusCache()
+    public void GitIsConnectedThroughTheAsynchronousPromptPluginContract()
     {
-        var programPath = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory, "..", "..", "..", "..", "Jitzu.Shell", "Program.cs"));
-        var source = File.ReadAllText(programPath);
-
-        source.ShouldContain("var status = await gitCache.GetGitStatusForPromptAsync(gitRepoRoot.FullName);");
-        source.ShouldNotContain("GetGitStatusAsync(gitRepoRoot.FullName)");
+        typeof(IPromptPlugin).IsAssignableFrom(typeof(GitPromptPlugin)).ShouldBeTrue();
+        typeof(ReadLine).GetMethod(
+                "Read",
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null,
+                [typeof(string), typeof(PromptUpdateSession)],
+                modifiers: null)
+            .ShouldNotBeNull();
     }
 
     [Test]

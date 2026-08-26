@@ -3,6 +3,7 @@ using System.Security.Principal;
 using System.Text;
 using Jitzu.Shell.Core;
 using Jitzu.Shell.UI;
+using Jitzu.Shell.UI.PromptPlugins;
 using Jitzu.Shell;
 using Jitzu.Core;
 using Jitzu.Core.Common.Logging;
@@ -279,7 +280,8 @@ static async Task RunReplAsync(JitzuOptions options)
     var lastCommandDuration = TimeSpan.Zero;
     var user = Environment.UserName;
     var host = Environment.MachineName;
-    await using var gitCache = new GitStatusCache();
+    await using var gitPromptPlugin = new GitPromptPlugin(theme);
+    IReadOnlyList<IPromptPlugin> promptPlugins = [gitPromptPlugin];
     var promptSb = new StringBuilder();
     var cachedPadding = "";
 
@@ -311,81 +313,68 @@ static async Task RunReplAsync(JitzuOptions options)
             }
             else
             {
-                var dir = Environment.CurrentDirectory.Replace(userProfilePath, "~");
-
-                // Trims path to root of Git repository
-                var gitRepoRoot = gitCache.FindGitRepoFolder(Environment.CurrentDirectory);
-                if (gitRepoRoot is not null)
-                    dir = dir.Replace(gitRepoRoot.FullName, gitRepoRoot.Name);
+                var workingDirectory = Environment.CurrentDirectory;
+                var initialDirectory = workingDirectory.Replace(userProfilePath, "~");
 
                 TerminalIntegration.ReportCurrentDirectory();
-                TerminalIntegration.SetTitle(dir);
+                TerminalIntegration.SetTitle(initialDirectory);
                 Console.Write("\e[?25l"); // hide cursor during prompt build + render
 
                 // Notify about completed background jobs
                 var jobNotice = strategy.CheckCompletedJobs();
                 if (jobNotice is not null)
-                {
-                    gitCache.InvalidateStatus();
                     Console.WriteLine(jobNotice);
-                }
 
-                var branchSuffix = "";
-                if (gitRepoRoot is not null)
+                string ComposePrompt(IReadOnlyDictionary<string, PromptPluginUpdate> pluginUpdates)
                 {
-                    var branch = gitCache.GetGitBranch(gitRepoRoot.FullName);
-                    if (branch is not null)
+                    var dir = initialDirectory;
+                    promptSb.Clear();
+                    foreach (var plugin in promptPlugins)
                     {
-                        var status = await gitCache.GetGitStatusForPromptAsync(gitRepoRoot.FullName);
+                        if (!pluginUpdates.TryGetValue(plugin.Id, out var update))
+                            continue;
 
-                        promptSb.Clear();
-                        if (status.HasDirty) promptSb.Append($"{theme["git.dirty"]}*{ThemeConfig.Reset}");
-                        if (status.HasStaged) promptSb.Append($"{theme["git.staged"]}+{ThemeConfig.Reset}");
-                        if (status.HasUntracked) promptSb.Append($"{theme["git.untracked"]}?{ThemeConfig.Reset}");
-                        var statusStr = promptSb.Length > 0 ? $" {promptSb}" : "";
-
-                        promptSb.Clear();
-                        if (status.Ahead > 0) promptSb.Append($"↑{status.Ahead}");
-                        if (status.Behind > 0) promptSb.Append($"↓{status.Behind}");
-                        var remoteStr = promptSb.Length > 0 ? $" {theme["git.remote"]}{promptSb}{ThemeConfig.Reset}" : "";
-
-                        branchSuffix = $" {theme["git.branch"]}({branch}){ThemeConfig.Reset}{statusStr}{remoteStr}";
+                        if (update.DisplayDirectory is { Length: > 0 } displayDirectory)
+                            dir = displayDirectory;
+                        promptSb.Append(update.Text);
                     }
+                    var pluginText = promptSb.ToString();
+
+                    // Build line 1: user@host dir plus plugin segments, padded to the clock.
+                    var elevatedTag = isElevated ? $" {theme["prompt.error"]}[sudo]{ThemeConfig.Reset}" : "";
+                    var leftPart = $"{theme["prompt.user"]}{user}@{host}{ThemeConfig.Reset} {theme["prompt.directory"]}{dir}{ThemeConfig.Reset}{pluginText}{elevatedTag}";
+                    var visibleLeft = Markup.Remove(leftPart).Length;
+                    var timeStr = DateTime.Now.ToString("HH:mm");
+                    var bufferWidth = Console.BufferWidth;
+                    var padding = Math.Max(1, bufferWidth - visibleLeft - timeStr.Length);
+                    if (cachedPadding.Length != padding)
+                        cachedPadding = new string(' ', padding);
+                    var line1 = $"{leftPart}{cachedPadding}{theme["prompt.time"]}{timeStr}{ThemeConfig.Reset}";
+
+                    // Build line 2 (optional): [N] took Xs
+                    promptSb.Clear();
+                    var activeJobs = strategy.Jobs.Count(j => !j.Process.HasExited);
+                    if (activeJobs > 0)
+                        promptSb.Append($"{theme["prompt.jobs"]}[{activeJobs}]{ThemeConfig.Reset} ");
+
+                    if (lastCommandDuration.TotalSeconds >= 2)
+                    {
+                        var durationStr = lastCommandDuration.TotalMinutes >= 1
+                            ? $"{(int)lastCommandDuration.TotalMinutes}m {lastCommandDuration.Seconds}s"
+                            : $"{(int)lastCommandDuration.TotalSeconds}s";
+                        promptSb.Append($"{theme["prompt.duration"]}took {durationStr}{ThemeConfig.Reset}");
+                    }
+
+                    var line2 = promptSb.Length > 0 ? $"{promptSb}\n" : "";
+                    var arrowColor = lastCommandSuccess ? theme["prompt.arrow"] : theme["prompt.error"];
+                    var promptChar = isElevated ? "#" : ">";
+                    return $"{line1}\n{line2}{arrowColor}{ThemeConfig.Bold}{promptChar}{ThemeConfig.Reset} ";
                 }
 
-                // Build line 1: user@host dir (branch)*+? ↑1          HH:mm
-                var elevatedTag = isElevated ? $" {theme["prompt.error"]}[sudo]{ThemeConfig.Reset}" : "";
-                var leftPart = $"{theme["prompt.user"]}{user}@{host}{ThemeConfig.Reset} {theme["prompt.directory"]}{dir}{ThemeConfig.Reset}{branchSuffix}{elevatedTag}";
-                var visibleLeft = Markup.Remove(leftPart).Length;
-                var timeStr = DateTime.Now.ToString("HH:mm");
-                var bufferWidth = Console.BufferWidth;
-                var padding = Math.Max(1, bufferWidth - visibleLeft - timeStr.Length);
-                if (cachedPadding.Length != padding)
-                    cachedPadding = new string(' ', padding);
-                var line1 = $"{leftPart}{cachedPadding}{theme["prompt.time"]}{timeStr}{ThemeConfig.Reset}";
-
-                // Build line 2 (optional): [N] took Xs
-                promptSb.Clear();
-                var activeJobs = strategy.Jobs.Count(j => !j.Process.HasExited);
-                if (activeJobs > 0)
-                    promptSb.Append($"{theme["prompt.jobs"]}[{activeJobs}]{ThemeConfig.Reset} ");
-
-                if (lastCommandDuration.TotalSeconds >= 2)
-                {
-                    var durationStr = lastCommandDuration.TotalMinutes >= 1
-                        ? $"{(int)lastCommandDuration.TotalMinutes}m {lastCommandDuration.Seconds}s"
-                        : $"{(int)lastCommandDuration.TotalSeconds}s";
-                    promptSb.Append($"{theme["prompt.duration"]}took {durationStr}{ThemeConfig.Reset}");
-                }
-
-                var line2 = promptSb.Length > 0 ? $"{promptSb}\n" : "";
-
-                // Build line 3: arrow colored by last command success
-                var arrowColor = lastCommandSuccess ? theme["prompt.arrow"] : theme["prompt.error"];
-                var promptChar = isElevated ? "#" : ">";
-
-                var prompt = $"{line1}\n{line2}{arrowColor}{ThemeConfig.Bold}{promptChar}{ThemeConfig.Reset} ";
-                line = readLine.Read(prompt);
+                var initialPrompt = ComposePrompt(new Dictionary<string, PromptPluginUpdate>());
+                var promptContext = new PromptContext(workingDirectory, initialDirectory);
+                await using var promptUpdates = new PromptUpdateSession(promptPlugins, promptContext, ComposePrompt);
+                line = readLine.Read(initialPrompt, promptUpdates);
             }
 
             StartupProfiler.Mark("input-accepted");
@@ -427,18 +416,7 @@ static async Task RunReplAsync(JitzuOptions options)
             }
 
             var sw = Stopwatch.StartNew();
-            ShellResult result;
-            try
-            {
-                result = await strategy.ExecuteAsync(line);
-            }
-            finally
-            {
-                // Commands may change files, the index, or the current directory. Invalidate
-                // without waiting so the next prompt remains responsive; the cache owns the
-                // refresh task and publishes only the newest generation.
-                gitCache.InvalidateStatus();
-            }
+            var result = await strategy.ExecuteAsync(line);
             sw.Stop();
 
             if (builtins.ExitRequested)

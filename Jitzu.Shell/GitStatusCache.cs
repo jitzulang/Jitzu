@@ -104,10 +104,6 @@ internal sealed class GitStatusCache : IDisposable, IAsyncDisposable
             _cachedHeadPath = headPath;
             _cachedHeadWriteTime = lastWrite;
 
-            // Branch changes also change the branch metadata reported by git status.
-            // Invalidate the working-tree snapshot without waiting on git here.
-            InvalidateStatus(gitRepoPath);
-
             if (headContent.StartsWith("ref: refs/heads/"))
                 _cachedBranch = headContent["ref: refs/heads/".Length..];
             else if (headContent.Length >= 7)
@@ -227,6 +223,11 @@ internal sealed class GitStatusCache : IDisposable, IAsyncDisposable
     /// </summary>
     public static Task<GitStatus> GetGitStatusAsync(string gitRepoPath)
         => ReadGitStatusAsync(gitRepoPath, CancellationToken.None);
+
+    internal static Task<GitStatus> GetGitStatusAsync(
+        string gitRepoPath,
+        CancellationToken cancellationToken)
+        => ReadGitStatusAsync(gitRepoPath, cancellationToken);
 
     public void Dispose()
     {

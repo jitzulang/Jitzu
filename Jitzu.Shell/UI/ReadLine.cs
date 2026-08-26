@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Jitzu.Core;
 using Jitzu.Shell.Core.Completions;
+using Jitzu.Shell.UI.PromptPlugins;
 
 namespace Jitzu.Shell.UI;
 
@@ -125,7 +126,9 @@ public class ReadLine(
         value.CopyTo(CollectionsMarshal.AsSpan(_buffer));
     }
 
-    public string Read(string prompt)
+    public string Read(string prompt) => Read(prompt, null);
+
+    internal string Read(string prompt, PromptUpdateSession? promptUpdates)
     {
         // Return queued lines from a previous multi-line paste
         if (_pastedLines.TryDequeue(out var queued))
@@ -179,6 +182,14 @@ public class ReadLine(
         {
             while (true)
             {
+                if (promptUpdates?.TryGetPrompt(out var updatedPrompt) is true
+                    && !string.Equals(_prompt, updatedPrompt, StringComparison.Ordinal))
+                {
+                    _prompt = updatedPrompt;
+                    _promptPlain = Markup.Remove(updatedPrompt);
+                    RedrawLine();
+                }
+
                 if (_cancelPressed)
                 {
                     _cancelPressed = false;

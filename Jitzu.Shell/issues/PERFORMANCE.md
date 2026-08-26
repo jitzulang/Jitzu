@@ -4,7 +4,7 @@
 
 | # | Issue | Fix |
 |---|-------|-----|
-| 1 | Git subprocess spawned every prompt | `GitStatusCache` — repo root cached by directory, branch cached by .git/HEAD mtime |
+| 1 | Git repository metadata rescanned every prompt | The Git prompt plugin retains repo-root and `.git/HEAD` metadata caches across prompt sessions |
 | 2 | `new string(_buffer.ToArray())` per keystroke | `CollectionsMarshal.AsSpan` for return sites; zero-alloc span for hot paths |
 | 3 | `HighlightBuffer` allocates StringBuilder per keystroke | Reused field-level `_highlightSb`, writes into caller's `ArrayBufferWriter` via `GetChunks` |
 | 4 | Theme dictionary lookups in highlight loop | Already `FrozenDictionary` — no issue |
@@ -15,7 +15,7 @@
 | 9 | PATH enumeration on every tab press | `_pathDirectoryCache` — file names cached per PATH directory, invalidated by directory mtime |
 | 10 | Prompt builder allocates 3 StringBuilders + padding string every render | Single reusable `promptSb` cleared between uses; `cachedPadding` string reused when width unchanged |
 | 11 | `RedrawLine` allocates new `ArrayBufferWriter<char>` every keystroke | Promoted to field-level `_redrawBuf` with `ResetWrittenCount()` — internal array reused across calls |
-| 12 | Prompt blocks on `git status` subprocess | The first prompt in a repository awaits its initial snapshot; later prompts use a tracked stale-while-refreshing cache that retains findings, while generation guards and disposal handle races and cleanup |
+| 12 | Prompt blocks on `git status` subprocess | Git is an asynchronous prompt plugin. The base prompt becomes interactive immediately, then the ReadLine thread atomically redraws it when Git publishes branch/status findings, preserving the user's buffer and cursor. |
 | 13 | Independent startup I/O runs sequentially | Theme, runtime, history, and aliases initialize concurrently |
 | 14 | Shell eagerly builds the language runtime and NuGet resolver | Runtime initialization is deferred until a Jitzu expression or runtime-aware completion needs it |
 | 15 | Theme parsing creates a UTF-16 string and JSON DOM | Forward-only `Utf8JsonReader` parses bytes directly; 3.7% faster median startup in isolation |

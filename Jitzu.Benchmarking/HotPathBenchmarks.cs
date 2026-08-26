@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using Jitzu.Shell;
 using Jitzu.Shell.Core;
+using Jitzu.Shell.UI.PromptPlugins;
 
 namespace Jitzu.Benchmarking;
 
@@ -18,23 +20,21 @@ internal static class HotPathBenchmarks
         await MeasureAsync(results, "git/status-refresh", 2, 20,
             async () => _ = await GitStatusCache.GetGitStatusAsync(repositoryRoot));
 
-        await using (var gitCache = new GitStatusCache(
-                         TimeSpan.FromMinutes(1),
-                         async (_, cancellationToken) =>
-                         {
-                             await Task.Delay(1, cancellationToken);
-                             return new GitStatus(HasDirty: true);
-                         }))
+        var promptPlugin = new ImmediatePromptPlugin();
+        var promptContext = new PromptContext(repositoryRoot, Path.GetFileName(repositoryRoot));
+        await MeasureAsync(results, "prompt/plugin-update-delivery", 10, 1_000, async () =>
         {
-            gitCache.GetGitStatus(repositoryRoot);
-            for (var attempt = 0; attempt < 200 && !gitCache.GetGitStatus(repositoryRoot).HasDirty; attempt++)
+            await using var session = new PromptUpdateSession(
+                [promptPlugin], promptContext, updates => updates[promptPlugin.Id].Text);
+            for (var attempt = 0; attempt < 2_000; attempt++)
+            {
+                if (session.TryGetPrompt(out _))
+                    return;
                 await Task.Delay(1);
-            if (!gitCache.GetGitStatus(repositoryRoot).HasDirty)
-                throw new TimeoutException("Timed out priming the prompt Git cache.");
+            }
 
-            await MeasureAsync(results, "prompt/git-status-cache-hit", 10, 1_000,
-                async () => _ = await gitCache.GetGitStatusForPromptAsync(repositoryRoot));
-        }
+            throw new TimeoutException("Timed out waiting for the prompt plugin update.");
+        });
 
         await MeasureAsync(results, "runtime/cold-expression", 2, 10, async () =>
         {
@@ -71,6 +71,22 @@ internal static class HotPathBenchmarks
         }
 
         results.Add(CreateResult(name, samples, 1));
+    }
+
+    private sealed class ImmediatePromptPlugin : IPromptPlugin
+    {
+        public string Id => "benchmark";
+
+        public async IAsyncEnumerable<PromptPluginUpdate> GetUpdatesAsync(
+            PromptContext context,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return new PromptPluginUpdate("git");
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private static void MeasureHistoryExpansion(List<HotPathResult> results)
