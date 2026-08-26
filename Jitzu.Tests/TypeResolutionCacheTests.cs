@@ -48,14 +48,41 @@ public class TypeResolutionCacheTests
     }
 
     [Test]
-    public async Task DirectTypeDictionaryAddition_IsPickedUpOnNextPatch()
+    public async Task ControlledTypeRegistration_IsPickedUpOnNextPatch()
     {
         var program = await ProgramBuilder.Build(ScriptExpression.Empty);
-        program.Types.Add("DirectlyAddedType", typeof(Uri));
+        program.RegisterType("DirectlyAddedType", typeof(Uri));
 
         await ProgramBuilder.PatchProgram(program, ParseScript(string.Empty));
 
         program.SimpleTypeCache["DirectlyAddedType"].ShouldBe(typeof(Uri));
+    }
+
+    [Test]
+    public async Task ReplacingExistingType_UpdatesSimpleNameBucket()
+    {
+        var program = await ProgramBuilder.Build(ScriptExpression.Empty);
+
+        program.RegisterType("ReplaceableType", typeof(Uri));
+        program.RegisterType("ReplaceableType", typeof(Guid));
+
+        program.SimpleTypeCache["ReplaceableType"].ShouldBe(typeof(Guid));
+        program.TypeNameConflicts.ContainsKey("ReplaceableType").ShouldBeFalse();
+    }
+
+    [Test]
+    public async Task RemovingAndAddingAtSameCount_UpdatesBothSimpleNameBuckets()
+    {
+        var program = await ProgramBuilder.Build(ScriptExpression.Empty);
+        program.RegisterType("RuntimeSwap.Left", typeof(Uri));
+        program.RegisterType("RuntimeSwap.Right", typeof(Guid));
+
+        program.RemoveType("RuntimeSwap.Left").ShouldBeTrue();
+        program.RegisterType("RuntimeSwap.Replacement", typeof(DateTime));
+
+        program.SimpleTypeCache.ContainsKey("Left").ShouldBeFalse();
+        program.SimpleTypeCache["Right"].ShouldBe(typeof(Guid));
+        program.SimpleTypeCache["Replacement"].ShouldBe(typeof(DateTime));
     }
 
     [Test]

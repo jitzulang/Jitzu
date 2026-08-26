@@ -134,10 +134,7 @@ public static class ProgramBuilder
         // Build the type indexes once for the initial BCL/base type universe. REPL
         // patches update this registry incrementally rather than rebuilding these
         // dictionaries from every known type.
-        program.TypeRegistry = new TypeRegistry(
-            program.Types,
-            program.SimpleTypeCache,
-            program.TypeNameConflicts);
+        program.EnsureTypeRegistry();
 
         return await PatchProgram(program, ast);
     }
@@ -145,7 +142,6 @@ public static class ProgramBuilder
     public static async Task<RuntimeProgram> PatchProgram(RuntimeProgram program, ScriptExpression ast)
     {
         var typeRegistry = program.EnsureTypeRegistry();
-        typeRegistry.Synchronize();
 
         foreach (var expression in ast.Body.OfType<TagExpression>())
         {

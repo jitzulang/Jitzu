@@ -10,7 +10,6 @@ internal class TypeRegistry
     private readonly Dictionary<string, Type> _simpleTypeCache;
     private readonly Dictionary<string, HashSet<string>> _typeNameConflicts;
     private readonly Dictionary<string, HashSet<string>> _simpleNameToFullNames;
-    private readonly Dictionary<string, Type> _indexedTypes;
 
     public IReadOnlyDictionary<string, Type> Types => _types.AsReadOnly();
     public IReadOnlyDictionary<string, Type> SimpleTypeCache => _simpleTypeCache.AsReadOnly();
@@ -22,13 +21,12 @@ internal class TypeRegistry
         _simpleTypeCache = new Dictionary<string, Type>(StringComparer.Ordinal);
         _typeNameConflicts = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         _simpleNameToFullNames = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-        _indexedTypes = new Dictionary<string, Type>(StringComparer.Ordinal);
     }
 
     /// <summary>
     /// Creates a registry over the dictionaries owned by a <see cref="RuntimeProgram"/>.
-    /// The dictionaries remain mutable for compatibility, but registrations should go
-    /// through this registry so the simple-name indexes can be updated incrementally.
+    /// Registrations go through this registry so the simple-name indexes can be updated
+    /// incrementally without scanning the full type universe.
     /// </summary>
     public TypeRegistry(
         Dictionary<string, Type> types,
@@ -39,7 +37,6 @@ internal class TypeRegistry
         _simpleTypeCache = simpleTypeCache;
         _typeNameConflicts = typeNameConflicts;
         _simpleNameToFullNames = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-        _indexedTypes = new Dictionary<string, Type>(StringComparer.Ordinal);
         BuildCaches();
     }
 
@@ -51,16 +48,15 @@ internal class TypeRegistry
     /// </summary>
     public void RegisterType(string fullQualifiedName, Type type)
     {
-        if (_indexedTypes.TryGetValue(fullQualifiedName, out var previous)
+        if (_types.TryGetValue(fullQualifiedName, out var previous)
             && ReferenceEquals(previous, type))
             return;
 
         var simpleName = ExtractSimpleName(fullQualifiedName);
-        if (_indexedTypes.ContainsKey(fullQualifiedName))
+        if (_types.ContainsKey(fullQualifiedName))
             RemoveFullName(simpleName, fullQualifiedName);
 
         _types[fullQualifiedName] = type;
-        _indexedTypes[fullQualifiedName] = type;
         AddFullName(simpleName, fullQualifiedName);
         RebuildSimpleName(simpleName);
     }
@@ -79,6 +75,20 @@ internal class TypeRegistry
     }
 
     /// <summary>
+    /// Removes a type and updates the affected simple-name bucket.
+    /// </summary>
+    public bool RemoveType(string fullQualifiedName)
+    {
+        if (!_types.Remove(fullQualifiedName))
+            return false;
+
+        var simpleName = ExtractSimpleName(fullQualifiedName);
+        RemoveFullName(simpleName, fullQualifiedName);
+        RebuildSimpleName(simpleName);
+        return true;
+    }
+
+    /// <summary>
     /// Builds the simple type cache and conflict tracking after all types are registered.
     /// RuntimeProgram uses this during initialization; later registrations update only
     /// their affected simple-name bucket through <see cref="RegisterType"/>.
@@ -88,44 +98,14 @@ internal class TypeRegistry
         _simpleTypeCache.Clear();
         _typeNameConflicts.Clear();
         _simpleNameToFullNames.Clear();
-        _indexedTypes.Clear();
 
         // Build a map of simple names to full qualified names
         foreach (var (fullName, type) in _types)
-        {
-            _indexedTypes[fullName] = type;
             AddFullName(ExtractSimpleName(fullName), fullName);
-        }
 
         // Populate cache and conflicts
         foreach (var simpleName in _simpleNameToFullNames.Keys)
             RebuildSimpleName(simpleName);
-    }
-
-    /// <summary>
-    /// Picks up direct mutations to the public type dictionary without doing any
-    /// work for the normal no-op REPL patch. Internal registrations already update
-    /// the index and therefore take the fast path here.
-    /// </summary>
-    public void Synchronize()
-    {
-        if (_indexedTypes.Count == _types.Count)
-            return;
-
-        foreach (var (fullName, type) in _types)
-        {
-            if (!_indexedTypes.TryGetValue(fullName, out var indexedType)
-                || !ReferenceEquals(indexedType, type))
-                RegisterType(fullName, type);
-        }
-
-        foreach (var fullName in _indexedTypes.Keys.Where(name => !_types.ContainsKey(name)).ToArray())
-        {
-            var simpleName = ExtractSimpleName(fullName);
-            RemoveFullName(simpleName, fullName);
-            _indexedTypes.Remove(fullName);
-            RebuildSimpleName(simpleName);
-        }
     }
 
     private void AddFullName(string simpleName, string fullName)
