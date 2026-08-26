@@ -8,7 +8,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Clap.Net" Version="0.1.27-beta" />
+    <ProjectReference Include="..\Jitzu.Shell\Jitzu.Shell.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Clap.Net" Version="0.1.32-beta" />
     <PackageReference Include="CliWrap" Version="3.9.0" />
     <PackageReference Include="ConsoleTableExt" Version="3.3.0" />
     <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="10.0.0" />

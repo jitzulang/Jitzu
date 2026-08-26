@@ -4,6 +4,9 @@ namespace Jitzu.Benchmarking.Benchmarks;
 
 public record BenchmarkConfig
 {
+    [JsonPropertyName("warmups")]
+    public int Warmups { get; init; } = 2;
+
     [JsonPropertyName("iterations")]
     public int Iterations { get; init; } = 15;
 

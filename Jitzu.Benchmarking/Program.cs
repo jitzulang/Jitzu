@@ -4,9 +4,19 @@ using Jitzu.Benchmarking.Benchmarks;
 using Jitzu.Benchmarking.Display;
 
 var benchmarkArgs = BenchmarkArgs.Parse(args);
-var results = new List<RunResult>();
+if (benchmarkArgs.HotPaths)
+{
+    await HotPathBenchmarks.RunAsync();
+    return;
+}
 
-foreach (var directory in Directory.GetDirectories(@"D:\git\jitzu\Jitzu.Benchmarking\Scripts"))
+var results = new List<RunResult>();
+var repositoryRoot = FindRepositoryRoot(AppContext.BaseDirectory);
+var scriptsRoot = benchmarkArgs.ScriptsPath is { Length: > 0 } configuredScripts
+    ? Path.GetFullPath(configuredScripts)
+    : Path.Combine(repositoryRoot, "Jitzu.Benchmarking", "Scripts");
+
+foreach (var directory in Directory.GetDirectories(scriptsRoot))
 {
     if (benchmarkArgs.Tests is { } tests && !tests.Contains(Path.GetFileName(directory)))
         continue;
@@ -30,13 +40,15 @@ static ResultSummary[] SummariseResults(List<RunResult> results)
         .GroupBy(_ => new { _.Script, _.Iterations, _.RunName })
         .Select(static r =>
         {
-            var (mean, err, stdDev) = CalculateAverages(r.Select(_ => _.Time).ToArray());
+            var (mean, median, p95, err, stdDev) = CalculateStatistics(r.Select(_ => _.Time).ToArray());
             return new ResultSummary
             {
                 Run = r.Key.RunName,
                 Script = r.Key.Script,
                 Iterations = r.Key.Iterations,
                 MeanTime = mean,
+                MedianTime = median,
+                P95Time = p95,
                 Error = err,
                 StdDev = stdDev,
             };
@@ -65,6 +77,8 @@ static string CreateTableFromResults(ResultSummary[] results)
                     N = result.Iterations,
                     Rank = rank++,
                     Mean = FormatTime(result.MeanTime.TotalNanoseconds),
+                    Median = FormatTime(result.MedianTime.TotalNanoseconds),
+                    P95 = FormatTime(result.P95Time.TotalNanoseconds),
                     Error = FormatTime(result.Error.TotalNanoseconds),
                     StdDev = FormatTime(result.StdDev.TotalNanoseconds),
                     Ratio = ratio.ToString("#0.00"),
@@ -92,7 +106,7 @@ static string CreateTableFromResults(ResultSummary[] results)
         .ToString();
 }
 
-static (TimeSpan Mean, TimeSpan Error, TimeSpan StdDev) CalculateAverages(TimeSpan[] times)
+static (TimeSpan Mean, TimeSpan Median, TimeSpan P95, TimeSpan Error, TimeSpan StdDev) CalculateStatistics(TimeSpan[] times)
 {
     if (times.Length == 0)
         return default;
@@ -106,9 +120,17 @@ static (TimeSpan Mean, TimeSpan Error, TimeSpan StdDev) CalculateAverages(TimeSp
 
     // Calculate standard error of the mean
     double error = stdDev / Math.Sqrt(times.Length);
+    var orderedTicks = times.Select(t => t.Ticks).Order().ToArray();
+    var middle = orderedTicks.Length / 2;
+    var medianTicks = orderedTicks.Length % 2 == 0
+        ? (orderedTicks[middle - 1] + orderedTicks[middle]) / 2
+        : orderedTicks[middle];
+    var p95Ticks = orderedTicks[(int)Math.Ceiling(orderedTicks.Length * 0.95) - 1];
 
     return (
         TimeSpan.FromMilliseconds(mean),
+        TimeSpan.FromTicks(medianTicks),
+        TimeSpan.FromTicks(p95Ticks),
         TimeSpan.FromMilliseconds(error),
         TimeSpan.FromMilliseconds(stdDev)
     );
@@ -136,6 +158,17 @@ static string FormatTime(double nanoseconds)
     };
 }
 
+static string FindRepositoryRoot(string startPath)
+{
+    for (var directory = new DirectoryInfo(startPath); directory is not null; directory = directory.Parent)
+    {
+        if (File.Exists(Path.Combine(directory.FullName, "Jitzu.slnx")))
+            return directory.FullName;
+    }
+
+    throw new DirectoryNotFoundException($"Could not find Jitzu.slnx above '{startPath}'.");
+}
+
 namespace Jitzu.Benchmarking
 {
     internal record Row
@@ -145,6 +178,8 @@ namespace Jitzu.Benchmarking
         public required int N { get; init; }
         public required int Rank { get; init; }
         public required string Mean { get; init; }
+        public required string Median { get; init; }
+        public required string P95 { get; init; }
         public required string Error { get; init; }
         public required string StdDev { get; init; }
         public required string Ratio { get; init; }
