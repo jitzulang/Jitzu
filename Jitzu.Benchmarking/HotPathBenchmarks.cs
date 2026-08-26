@@ -32,8 +32,8 @@ internal static class HotPathBenchmarks
             if (!gitCache.GetGitStatus(repositoryRoot).HasDirty)
                 throw new TimeoutException("Timed out priming the prompt Git cache.");
 
-            Measure(results, "prompt/git-status-cache-hit", 10, 1_000,
-                () => _ = gitCache.GetGitStatus(repositoryRoot));
+            await MeasureAsync(results, "prompt/git-status-cache-hit", 10, 1_000,
+                async () => _ = await gitCache.GetGitStatusForPromptAsync(repositoryRoot));
         }
 
         await MeasureAsync(results, "runtime/cold-expression", 2, 10, async () =>
@@ -67,23 +67,6 @@ internal static class HotPathBenchmarks
         {
             var start = Stopwatch.GetTimestamp();
             await operation();
-            samples[i] = Stopwatch.GetTimestamp() - start;
-        }
-
-        results.Add(CreateResult(name, samples, 1));
-    }
-
-    private static void Measure(List<HotPathResult> results, string name, int warmups, int iterations,
-        Action operation)
-    {
-        for (var i = 0; i < warmups; i++)
-            operation();
-
-        var samples = new long[iterations];
-        for (var i = 0; i < iterations; i++)
-        {
-            var start = Stopwatch.GetTimestamp();
-            operation();
             samples[i] = Stopwatch.GetTimestamp() - start;
         }
 

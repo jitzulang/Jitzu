@@ -159,6 +159,44 @@ internal sealed class GitStatusCache : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
+    /// Returns status for prompt rendering. A repository with no completed snapshot waits for its
+    /// initial refresh so the first prompt is complete. Once a snapshot exists this returns it
+    /// immediately while any newer generation continues refreshing in the background.
+    /// </summary>
+    public async ValueTask<GitStatus> GetGitStatusForPromptAsync(string gitRepoPath)
+    {
+        while (true)
+        {
+            Task? refreshTask;
+            lock (_statusLock)
+            {
+                if (_disposed || string.IsNullOrWhiteSpace(gitRepoPath))
+                    return default;
+
+                // GetGitStatus owns repository switching and refresh startup. The lock is
+                // re-entrant, so use that single path rather than duplicating its state changes.
+                var status = GetGitStatus(gitRepoPath);
+                if (_statusValid)
+                    return status;
+
+                refreshTask = _statusRefresh;
+                if (refreshTask is null)
+                    return default;
+            }
+
+            try
+            {
+                await refreshTask.ConfigureAwait(false);
+            }
+            catch
+            {
+                // Refresh is best effort and observes its own failures. Re-check the cache state;
+                // disposal or a failed reader will have produced a completed default snapshot.
+            }
+        }
+    }
+
+    /// <summary>
     /// Marks the current status snapshot as stale and starts (or queues) a background refresh.
     /// The last completed snapshot remains visible until the newer generation completes. This is
     /// intentionally synchronous: command completion must not wait for git before the next prompt

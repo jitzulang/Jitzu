@@ -13,8 +13,65 @@ public class GitStatusCacheTests
             AppContext.BaseDirectory, "..", "..", "..", "..", "Jitzu.Shell", "Program.cs"));
         var source = File.ReadAllText(programPath);
 
-        source.ShouldContain("var status = gitCache.GetGitStatus(gitRepoRoot.FullName);");
+        source.ShouldContain("var status = await gitCache.GetGitStatusForPromptAsync(gitRepoRoot.FullName);");
         source.ShouldNotContain("GetGitStatusAsync(gitRepoRoot.FullName)");
+    }
+
+    [Test]
+    public async Task GetGitStatusForPromptAsync_FirstVisitWaitsForInitialSnapshot()
+    {
+        using var repo = new TempGitRepository();
+        var started = NewSignal();
+        var release = NewSignal<GitStatus>();
+        await using var cache = new GitStatusCache(
+            TimeSpan.FromMinutes(1),
+            (_, cancellationToken) =>
+            {
+                started.TrySetResult();
+                return release.Task.WaitAsync(cancellationToken);
+            });
+
+        var promptStatus = cache.GetGitStatusForPromptAsync(repo.Path).AsTask();
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        promptStatus.IsCompleted.ShouldBeFalse();
+
+        release.TrySetResult(new GitStatus(HasDirty: true, Ahead: 1));
+        var completed = await promptStatus.WaitAsync(TimeSpan.FromSeconds(2));
+
+        completed.HasDirty.ShouldBeTrue();
+        completed.Ahead.ShouldBe(1);
+    }
+
+    [Test]
+    public async Task GetGitStatusForPromptAsync_ReturnsCompletedSnapshotDuringReplacement()
+    {
+        using var repo = new TempGitRepository();
+        var reads = 0;
+        var replacementStarted = NewSignal();
+        var releaseReplacement = NewSignal<GitStatus>();
+        await using var cache = new GitStatusCache(
+            TimeSpan.FromMinutes(1),
+            (_, cancellationToken) =>
+            {
+                if (Interlocked.Increment(ref reads) == 1)
+                    return Task.FromResult(new GitStatus(HasDirty: true));
+
+                replacementStarted.TrySetResult();
+                return releaseReplacement.Task.WaitAsync(cancellationToken);
+            });
+
+        var initial = await cache.GetGitStatusForPromptAsync(repo.Path);
+        initial.HasDirty.ShouldBeTrue();
+
+        cache.InvalidateStatus(repo.Path);
+        await replacementStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var stopwatch = Stopwatch.StartNew();
+        var whileRefreshing = await cache.GetGitStatusForPromptAsync(repo.Path);
+        stopwatch.Stop();
+
+        whileRefreshing.HasDirty.ShouldBeTrue();
+        stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromMilliseconds(250));
+        releaseReplacement.TrySetResult(new GitStatus(HasUntracked: true));
     }
 
     [Test]
