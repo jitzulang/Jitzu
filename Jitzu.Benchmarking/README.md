@@ -12,9 +12,10 @@ Run the focused in-process and repository hot-path probes:
 dotnet run --project Jitzu.Benchmarking -c Release --no-build -- --hot-paths
 ```
 
-This covers prompt Git status, cold and steady REPL expressions, history expansion,
-and failure-atomic history persistence at several sizes. History persistence uses an
-isolated temporary directory and does not touch the user's history.
+This separates raw Git refresh cost from cached prompt lookup, and queued history
+submission from eventual durable persistence. It also covers cold and steady REPL
+expressions and history expansion. History persistence uses an isolated temporary
+directory and does not touch the user's history.
 
 Run the cross-language script suite, or select a workload and runtime:
 

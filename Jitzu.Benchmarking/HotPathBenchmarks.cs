@@ -11,8 +11,26 @@ internal static class HotPathBenchmarks
         var results = new List<HotPathResult>();
         var repositoryRoot = FindRepositoryRoot(AppContext.BaseDirectory);
 
-        await MeasureAsync(results, "prompt/git-status", 2, 20,
+        await MeasureAsync(results, "git/status-refresh", 2, 20,
             async () => _ = await GitStatusCache.GetGitStatusAsync(repositoryRoot));
+
+        await using (var gitCache = new GitStatusCache(
+                         TimeSpan.FromMinutes(1),
+                         async (_, cancellationToken) =>
+                         {
+                             await Task.Delay(1, cancellationToken);
+                             return new GitStatus(HasDirty: true);
+                         }))
+        {
+            gitCache.GetGitStatus(repositoryRoot);
+            for (var attempt = 0; attempt < 200 && !gitCache.GetGitStatus(repositoryRoot).HasDirty; attempt++)
+                await Task.Delay(1);
+            if (!gitCache.GetGitStatus(repositoryRoot).HasDirty)
+                throw new TimeoutException("Timed out priming the prompt Git cache.");
+
+            Measure(results, "prompt/git-status-cache-hit", 10, 1_000,
+                () => _ = gitCache.GetGitStatus(repositoryRoot));
+        }
 
         await MeasureAsync(results, "runtime/cold-expression", 2, 10, async () =>
         {
@@ -27,6 +45,7 @@ internal static class HotPathBenchmarks
             EnsureSuccessful(await warmSession.ExecuteAsync("1 + 2")));
 
         MeasureHistoryExpansion(results);
+        await MeasureHistoryQueueAsync(results, 2_500);
         await MeasureHistoryPersistenceAsync(results, 100);
         await MeasureHistoryPersistenceAsync(results, 2_500);
         await MeasureHistoryPersistenceAsync(results, 10_000);
@@ -44,6 +63,23 @@ internal static class HotPathBenchmarks
         {
             var start = Stopwatch.GetTimestamp();
             await operation();
+            samples[i] = Stopwatch.GetTimestamp() - start;
+        }
+
+        results.Add(CreateResult(name, samples, 1));
+    }
+
+    private static void Measure(List<HotPathResult> results, string name, int warmups, int iterations,
+        Action operation)
+    {
+        for (var i = 0; i < warmups; i++)
+            operation();
+
+        var samples = new long[iterations];
+        for (var i = 0; i < iterations; i++)
+        {
+            var start = Stopwatch.GetTimestamp();
+            operation();
             samples[i] = Stopwatch.GetTimestamp() - start;
         }
 
@@ -101,7 +137,38 @@ internal static class HotPathBenchmarks
                 samples[sample] = Stopwatch.GetTimestamp() - start;
             }
 
-            results.Add(CreateResult($"history/persist-{entries}", samples, 1));
+            results.Add(CreateResult($"history/durable-{entries}", samples, 1));
+        }
+        finally
+        {
+            foreach (var file in Directory.EnumerateFiles(benchmarkDirectory))
+                File.Delete(file);
+            Directory.Delete(benchmarkDirectory);
+        }
+    }
+
+    private static async Task MeasureHistoryQueueAsync(List<HotPathResult> results, int entries)
+    {
+        const int iterations = 20;
+        var benchmarkDirectory = Path.Combine(Path.GetTempPath(), $"jitzu-history-queue-benchmark-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(benchmarkDirectory);
+        try
+        {
+            var samples = new long[iterations];
+            for (var sample = 0; sample < iterations; sample++)
+            {
+                var historyPath = Path.Combine(benchmarkDirectory, $"history-{sample}.txt");
+                var history = new HistoryManager(persist: true, historyPath);
+                for (var i = 0; i < entries; i++)
+                    history.Record($"command {i:D5} --with representative arguments");
+
+                var start = Stopwatch.GetTimestamp();
+                history.QueueWrite("measured command");
+                samples[sample] = Stopwatch.GetTimestamp() - start;
+                await history.FlushAsync();
+            }
+
+            results.Add(CreateResult($"history/queue-{entries}", samples, 1));
         }
         finally
         {
