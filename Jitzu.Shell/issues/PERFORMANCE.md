@@ -15,7 +15,7 @@
 | 9 | PATH enumeration on every tab press | `_pathDirectoryCache` — file names cached per PATH directory, invalidated by directory mtime |
 | 10 | Prompt builder allocates 3 StringBuilders + padding string every render | Single reusable `promptSb` cleared between uses; `cachedPadding` string reused when width unchanged |
 | 11 | `RedrawLine` allocates new `ArrayBufferWriter<char>` every keystroke | Promoted to field-level `_redrawBuf` with `ResetWrittenCount()` — internal array reused across calls |
-| 12 | Prompt blocks on `git status` subprocess | Tracked stale-while-refreshing cache; command invalidation and generation guards preserve prompt correctness, while disposal cancels and awaits refreshes |
+| 12 | Prompt blocks on `git status` subprocess | Tracked stale-while-refreshing cache retains the last completed snapshot; command invalidation and generation guards refresh without starving prompt findings, while disposal cancels and awaits refreshes |
 | 13 | Independent startup I/O runs sequentially | Theme, runtime, history, and aliases initialize concurrently |
 | 14 | Shell eagerly builds the language runtime and NuGet resolver | Runtime initialization is deferred until a Jitzu expression or runtime-aware completion needs it |
 | 15 | Theme parsing creates a UTF-16 string and JSON DOM | Forward-only `Utf8JsonReader` parses bytes directly; 3.7% faster median startup in isolation |

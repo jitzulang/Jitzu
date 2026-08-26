@@ -19,4 +19,7 @@ public partial class BenchmarkArgs
 
     [Arg(Long = "hot-paths")]
     public bool HotPaths { get; init; }
+
+    [Arg(Long = "repository")]
+    public string? RepositoryPath { get; init; }
 }

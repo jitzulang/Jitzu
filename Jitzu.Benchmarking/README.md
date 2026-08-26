@@ -10,6 +10,7 @@ Run the focused in-process and repository hot-path probes:
 
 ```powershell
 dotnet run --project Jitzu.Benchmarking -c Release --no-build -- --hot-paths
+dotnet run --project Jitzu.Benchmarking -c Release --no-build -- --hot-paths --repository D:\git\large-repository
 ```
 
 This separates raw Git refresh cost from cached prompt lookup, and queued history

@@ -53,7 +53,7 @@ public class GitStatusCacheTests
     }
 
     [Test]
-    public async Task InvalidateStatus_HidesStaleSnapshot_AndPublishesReplacement()
+    public async Task InvalidateStatus_KeepsCompletedSnapshotVisible_AndPublishesReplacement()
     {
         using var repo = new TempGitRepository();
         var reads = 0;
@@ -74,7 +74,9 @@ public class GitStatusCacheTests
         initial.HasDirty.ShouldBeTrue();
 
         cache.InvalidateStatus(repo.Path);
-        cache.GetGitStatus(repo.Path).ShouldBe(default);
+        var whileRefreshing = cache.GetGitStatus(repo.Path);
+        whileRefreshing.HasDirty.ShouldBeTrue();
+        whileRefreshing.HasUntracked.ShouldBeFalse();
         await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
         reads.ShouldBe(2);
 

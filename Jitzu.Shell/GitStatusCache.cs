@@ -126,8 +126,8 @@ internal sealed class GitStatusCache : IDisposable, IAsyncDisposable
     /// <summary>
     /// Returns the latest completed working-tree status without waiting for git. The first read,
     /// periodic reads, and reads requested by <see cref="InvalidateStatus"/> are performed by a
-    /// tracked background task. A status invalidated by a command is hidden until its replacement
-    /// is complete, so a prompt cannot display a known-stale snapshot.
+    /// tracked background task. A completed snapshot remains visible while its replacement runs,
+    /// so repeated command invalidations cannot permanently hide Git findings from the prompt.
     /// </summary>
     public GitStatus GetGitStatus(string gitRepoPath)
     {
@@ -160,8 +160,9 @@ internal sealed class GitStatusCache : IDisposable, IAsyncDisposable
 
     /// <summary>
     /// Marks the current status snapshot as stale and starts (or queues) a background refresh.
-    /// This is intentionally synchronous: command completion must not wait for git before the
-    /// next prompt can be rendered.
+    /// The last completed snapshot remains visible until the newer generation completes. This is
+    /// intentionally synchronous: command completion must not wait for git before the next prompt
+    /// can be rendered.
     /// </summary>
     public void InvalidateStatus(string? gitRepoPath = null)
     {
@@ -176,8 +177,6 @@ internal sealed class GitStatusCache : IDisposable, IAsyncDisposable
                 return;
             }
 
-            _status = default;
-            _statusValid = false;
             _statusRefreshRequested = true;
             _statusGeneration++;
             StartStatusRefreshIfNeeded();

@@ -6,7 +6,7 @@ using Jitzu.Benchmarking.Display;
 var benchmarkArgs = BenchmarkArgs.Parse(args);
 if (benchmarkArgs.HotPaths)
 {
-    await HotPathBenchmarks.RunAsync();
+    await HotPathBenchmarks.RunAsync(benchmarkArgs.RepositoryPath);
     return;
 }
 

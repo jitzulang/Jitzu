@@ -6,10 +6,14 @@ namespace Jitzu.Benchmarking;
 
 internal static class HotPathBenchmarks
 {
-    public static async Task RunAsync()
+    public static async Task RunAsync(string? repositoryPath = null)
     {
         var results = new List<HotPathResult>();
-        var repositoryRoot = FindRepositoryRoot(AppContext.BaseDirectory);
+        var repositoryRoot = repositoryPath is { Length: > 0 }
+            ? Path.GetFullPath(repositoryPath)
+            : FindRepositoryRoot(AppContext.BaseDirectory);
+        if (!Directory.Exists(repositoryRoot))
+            throw new DirectoryNotFoundException($"Benchmark repository was not found: '{repositoryRoot}'.");
 
         await MeasureAsync(results, "git/status-refresh", 2, 20,
             async () => _ = await GitStatusCache.GetGitStatusAsync(repositoryRoot));
