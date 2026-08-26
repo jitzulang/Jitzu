@@ -131,11 +131,22 @@ public static class ProgramBuilder
         foreach (var function in program.GlobalFunctions)
             slotBuilder.Add(function.Key);
 
+        // Build the type indexes once for the initial BCL/base type universe. REPL
+        // patches update this registry incrementally rather than rebuilding these
+        // dictionaries from every known type.
+        program.TypeRegistry = new TypeRegistry(
+            program.Types,
+            program.SimpleTypeCache,
+            program.TypeNameConflicts);
+
         return await PatchProgram(program, ast);
     }
 
     public static async Task<RuntimeProgram> PatchProgram(RuntimeProgram program, ScriptExpression ast)
     {
+        var typeRegistry = program.EnsureTypeRegistry();
+        typeRegistry.Synchronize();
+
         foreach (var expression in ast.Body.OfType<TagExpression>())
         {
             // No version → assume the namespace is in an already-loaded BCL assembly
@@ -157,20 +168,13 @@ public static class ProgramBuilder
                 program.LoadedAssemblies.Add(assembly);
 
                 foreach (var type in assembly.ExportedTypes)
-                {
-                    program.Types.TryAdd(type.FullName ?? type.Name, type);
-                }
+                    typeRegistry.TryRegisterType(type.FullName ?? type.Name, type);
             }
         }
 
         AllocateSlots(ast, program.SlotBuilder);
 
         UserTypeEmitter.RegisterUserTypes(program, ast.Body.OfType<TypeDefinitionExpression>());
-
-        // Rebuild caches after user types are registered
-        var (updatedSimpleTypeCache, updatedTypeNameConflicts) = BuildTypeResolutionCaches(program.Types);
-        program.SimpleTypeCache = updatedSimpleTypeCache;
-        program.TypeNameConflicts = updatedTypeNameConflicts;
 
         var transformer = new AstTransformer(program);
         transformer.TransformScriptExpression(ast, program.SlotBuilder);
@@ -224,53 +228,6 @@ public static class ProgramBuilder
         };
     }
 
-    private static (Dictionary<string, Type>, Dictionary<string, HashSet<string>>) BuildTypeResolutionCaches(
-        Dictionary<string, Type> types)
-    {
-        var simpleTypeCache = new Dictionary<string, Type>();
-        var typeNameConflicts = new Dictionary<string, HashSet<string>>();
-
-        // Build a map of simple names to full qualified names
-        var simpleNameToFullNames = new Dictionary<string, HashSet<string>>();
-
-        foreach (var (fullName, _) in types)
-        {
-            var simpleName = ExtractSimpleName(fullName);
-
-            if (!simpleNameToFullNames.TryGetValue(simpleName, out var fullNames))
-            {
-                fullNames = new HashSet<string>();
-                simpleNameToFullNames[simpleName] = fullNames;
-            }
-
-            fullNames.Add(fullName);
-        }
-
-        // Populate cache and conflicts. Dedupe by Type identity — two registrations
-        // pointing at the same CLR type (e.g. BaseTypes["Path"] and the BCL walker
-        // adding "System.IO.Path") are not a real conflict.
-        foreach (var (simpleName, fullNames) in simpleNameToFullNames)
-        {
-            var distinctTypes = fullNames.Select(fn => types[fn]).Distinct().ToArray();
-            if (distinctTypes.Length == 1)
-            {
-                simpleTypeCache[simpleName] = distinctTypes[0];
-            }
-            else
-            {
-                typeNameConflicts[simpleName] = fullNames;
-            }
-        }
-
-        return (simpleTypeCache, typeNameConflicts);
-    }
-
-    private static string ExtractSimpleName(string fullQualifiedName)
-    {
-        var lastDot = fullQualifiedName.LastIndexOf('.');
-        return lastDot < 0 ? fullQualifiedName : fullQualifiedName[(lastDot + 1)..];
-    }
-    
     private static Assembly? LoadAssemblySafe(string path)
     {
         var assemblyName = AssemblyName.GetAssemblyName(path);

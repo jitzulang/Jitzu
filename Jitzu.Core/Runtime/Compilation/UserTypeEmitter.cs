@@ -111,7 +111,10 @@ public static class UserTypeEmitter
         // PHASE 5: Register actual created types in program
         foreach (var (fullName, type) in created)
         {
-            program.Types[fullName] = type;
+            // Keep the program's incremental type indexes in sync. A user type can
+            // intentionally replace an existing simple registration (for example,
+            // defining `Path`), so this is a replace operation rather than TryAdd.
+            program.RegisterType(fullName, type);
             if (!string.IsNullOrEmpty(sourceFilePath))
                 program.FileNamespaces[sourceFilePath] = namespacePrefix;
         }
