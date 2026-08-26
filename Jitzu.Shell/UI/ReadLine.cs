@@ -293,7 +293,7 @@ public class ReadLine(
                         if (!_dropdownIsCompletions && _dropdownIndex >= 0 && _dropdownIndex < _dropdownItems.Count)
                         {
                             var entry = _dropdownItems[_dropdownIndex];
-                            _ = history.RemoveAsync(entry);
+                            history.QueueRemove(entry);
                             _dropdownItems.RemoveAt(_dropdownIndex);
                             _predictions.Remove(entry);
 

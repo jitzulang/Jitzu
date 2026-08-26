@@ -413,7 +413,7 @@ static async Task RunReplAsync(JitzuOptions options)
                 try
                 {
                     if (persist)
-                        await history.WriteAsync(line);
+                        history.QueueWrite(line);
                     else
                         history.Record(line);
                 }
@@ -444,6 +444,15 @@ static async Task RunReplAsync(JitzuOptions options)
     }
     finally
     {
+        try
+        {
+            await history.FlushAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Warning: pending history could not be saved: {ex.Message}");
+        }
+
         theme.EnsureDefaultFile();
     }
 }

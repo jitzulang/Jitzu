@@ -20,3 +20,4 @@
 | 14 | Shell eagerly builds the language runtime and NuGet resolver | Runtime initialization is deferred until a Jitzu expression or runtime-aware completion needs it |
 | 15 | Theme parsing creates a UTF-16 string and JSON DOM | Forward-only `Utf8JsonReader` parses bytes directly; 3.7% faster median startup in isolation |
 | 16 | Config aliases rewrite the alias file once per command on every startup | Ignore unchanged aliases and batch config persistence into at most one write |
+| 17 | Full history file replacement blocks each interactive command | Queue in-memory history changes, coalesce failure-atomic persistence in the background, and flush during shutdown |
