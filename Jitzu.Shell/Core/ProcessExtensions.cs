@@ -8,23 +8,33 @@ namespace Jitzu.Shell.Core;
 internal static class ProcessExtensions
 {
     /// <summary>
-    /// Waits for a child process to exit while suppressing Ctrl+C on the shell.
-    /// Ctrl+C is delivered to the entire console process group (on both Windows and Unix),
-    /// which would also terminate the shell. Setting <c>args.Cancel = true</c> prevents the
-    /// CLR from raising the signal as an exception in this process while the child handles it.
+    /// Suppresses Ctrl+C termination for the current shell process. Ctrl+C is delivered to
+    /// the entire console process group, so an interactive child and the shell can receive
+    /// it together. The child is deliberately left to handle the event; this handler only
+    /// keeps the shell alive.
     /// </summary>
     private static readonly ConsoleCancelEventHandler SuppressCancelHandler = (_, args) => args.Cancel = true;
 
-    public static async Task WaitForExitSuppressingCancelAsync(this Process process, CancellationToken cancellationToken = default)
+    public static IDisposable SuppressConsoleCancel()
     {
         Console.CancelKeyPress += SuppressCancelHandler;
-        try
+        return new CancelSuppression();
+    }
+
+    public static async Task WaitForExitSuppressingCancelAsync(this Process process, CancellationToken cancellationToken = default)
+    {
+        using var suppression = SuppressConsoleCancel();
+        await process.WaitForExitAsync(cancellationToken);
+    }
+
+    private sealed class CancelSuppression : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
         {
-            await process.WaitForExitAsync(cancellationToken);
-        }
-        finally
-        {
-            Console.CancelKeyPress -= SuppressCancelHandler;
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                Console.CancelKeyPress -= SuppressCancelHandler;
         }
     }
 }

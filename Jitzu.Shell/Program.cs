@@ -209,6 +209,10 @@ static async Task RunReplAsync(JitzuOptions options)
     var theme = ThemeConfig.Load(options.Config);
     try
     {
+    var isInteractive = !Console.IsInputRedirected;
+    using var cancelSuppression = isInteractive
+        ? ProcessExtensions.SuppressConsoleCancel()
+        : null;
     var session = new ShellSession();
     history.Initialise();
     aliasManager.Initialise();
@@ -293,9 +297,6 @@ static async Task RunReplAsync(JitzuOptions options)
         var principal = new WindowsPrincipal(identity);
         isElevated = principal.IsInRole(WindowsBuiltInRole.Administrator);
     }
-
-    // When stdin is redirected (piped input), skip the interactive prompt and read lines directly
-    var isInteractive = !Console.IsInputRedirected;
 
     // Main REPL loop
     while (true)
