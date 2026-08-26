@@ -7,6 +7,17 @@ namespace Jitzu.Tests;
 public class GitStatusCacheTests
 {
     [Test]
+    public void PromptUsesNonBlockingGitStatusCache()
+    {
+        var programPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", "Jitzu.Shell", "Program.cs"));
+        var source = File.ReadAllText(programPath);
+
+        source.ShouldContain("var status = gitCache.GetGitStatus(gitRepoRoot.FullName);");
+        source.ShouldNotContain("GetGitStatusAsync(gitRepoRoot.FullName)");
+    }
+
+    [Test]
     public async Task GetGitStatus_ReturnsWithoutWaiting_AndReusesCompletedSnapshot()
     {
         using var repo = new TempGitRepository();

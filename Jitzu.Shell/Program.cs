@@ -336,7 +336,7 @@ static async Task RunReplAsync(JitzuOptions options)
                     var branch = gitCache.GetGitBranch(gitRepoRoot.FullName);
                     if (branch is not null)
                     {
-                        var status = await GitStatusCache.GetGitStatusAsync(gitRepoRoot.FullName);
+                        var status = gitCache.GetGitStatus(gitRepoRoot.FullName);
 
                         promptSb.Clear();
                         if (status.HasDirty) promptSb.Append($"{theme["git.dirty"]}*{ThemeConfig.Reset}");
