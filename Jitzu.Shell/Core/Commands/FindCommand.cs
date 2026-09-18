@@ -15,7 +15,7 @@ public class FindCommand : CommandBase
     {
         if (args.Length == 0)
             return Task.FromResult(new ShellResult(ResultType.Error, "",
-                new Exception("Usage: find <path> [-name pattern] [-type f|d] [-ext .cs]")));
+                new Exception("Usage: find <path> [-name|--name pattern] [-type|--type f|d] [-ext|--ext .cs] [-i|--gitignore]")));
 
         try
         {
@@ -34,18 +34,34 @@ public class FindCommand : CommandBase
                     case "--gitignore":
                         useGitIgnore = true;
                         break;
-                    case "-name" when i + 1 < args.Length:
+                    case "-name":
+                    case "--name":
+                        if (i + 1 >= args.Length)
+                            throw new ArgumentException($"Missing value for {arg}.");
                         namePattern = args.Span[++i];
                         break;
-                    case "-type" when i + 1 < args.Length:
-                        typeFilter = args.Span[++i][0];
+                    case "-type":
+                    case "--type":
+                        if (i + 1 >= args.Length)
+                            throw new ArgumentException($"Missing value for {arg}.");
+                        var type = args.Span[++i];
+                        if (type is not ("f" or "d"))
+                            throw new ArgumentException($"Invalid value for {arg}: {type}. Expected f or d.");
+                        typeFilter = type[0];
                         break;
-                    case "-ext" when i + 1 < args.Length:
+                    case "-ext":
+                    case "--ext":
+                        if (i + 1 >= args.Length)
+                            throw new ArgumentException($"Missing value for {arg}.");
                         extension = args.Span[++i];
                         if (!extension.StartsWith('.')) extension = "." + extension;
                         break;
                     default:
-                        searchPath ??= arg;
+                        if (arg.StartsWith('-'))
+                            throw new ArgumentException($"Unknown option: {arg}.");
+                        if (searchPath is not null)
+                            throw new ArgumentException($"Unexpected argument: {arg}.");
+                        searchPath = arg;
                         break;
                 }
             }

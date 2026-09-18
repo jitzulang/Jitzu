@@ -161,6 +161,48 @@ public class FindCommandTests : IDisposable
     // --- -name filter ---
 
     [Test]
+    public async Task LongNameFilter_OnlyReturnsExactMatchesInSubdirectories()
+    {
+        CreateFile("dist/float-setup.exe");
+        CreateFile("dist/other.exe");
+        CreateFile("float-setup.exe.bak");
+
+        var (output, type) = await Run(_tempDir, "--name", "float-setup.exe");
+
+        type.ShouldBe(ResultType.OsCommand);
+        output.ShouldBe(Path.GetRelativePath(Environment.CurrentDirectory, Abs("dist/float-setup.exe")));
+    }
+
+    [Test]
+    [Arguments("-name")]
+    [Arguments("--name")]
+    [Arguments("-type")]
+    [Arguments("--type")]
+    [Arguments("-ext")]
+    [Arguments("--ext")]
+    [Arguments("--nmae")]
+    public async Task InvalidOrIncompleteOption_ReturnsError(string option)
+    {
+        CreateFile("unrelated.txt");
+        var (output, type) = await Run(_tempDir, option);
+        type.ShouldBe(ResultType.Error);
+        output.ShouldBe("");
+    }
+
+    [Test]
+    public async Task LongFilters_CanBeCombined()
+    {
+        CreateFile("dist/float-setup.exe");
+        CreateFile("dist/float-setup.txt");
+        CreateDir("other/float-setup.exe");
+
+        var (output, type) = await Run(_tempDir, "--name", "float-*", "--ext", "exe", "--type", "f");
+
+        type.ShouldBe(ResultType.OsCommand);
+        output.ShouldBe(Path.GetRelativePath(Environment.CurrentDirectory, Abs("dist/float-setup.exe")));
+    }
+
+    [Test]
     public async Task NameFilter_ExactMatch()
     {
         CreateFile("target.cs");
