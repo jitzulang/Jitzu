@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 namespace Jitzu.Shell.Core.Commands;
 
 /// <summary>
-/// Recursively searches for files and directories.
+/// Recursively searches for files and directories, skipping ignored folders by default.
 /// </summary>
 public class FindCommand : CommandBase
 {
@@ -15,7 +15,7 @@ public class FindCommand : CommandBase
     {
         if (args.Length == 0)
             return Task.FromResult(new ShellResult(ResultType.Error, "",
-                new Exception("Usage: find <path> [-name|--name pattern] [-type|--type f|d] [-ext|--ext .cs] [-i|--gitignore]")));
+                new Exception("Usage: find <path> [-name|--name pattern] [-type|--type f|d] [-ext|--ext .cs] [--include-ignored]")));
 
         try
         {
@@ -23,13 +23,16 @@ public class FindCommand : CommandBase
             string? namePattern = null;
             string? extension = null;
             char? typeFilter = null; // 'f' for file, 'd' for directory
-            var useGitIgnore = false;
+            var useGitIgnore = true;
 
             for (var i = 0; i < args.Length; i++)
             {
                 var arg = args.Span[i];
                 switch (arg)
                 {
+                    case "--include-ignored":
+                        useGitIgnore = false;
+                        break;
                     case "-i":
                     case "--gitignore":
                         useGitIgnore = true;

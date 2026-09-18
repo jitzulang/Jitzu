@@ -354,21 +354,27 @@ public class FindCommandTests : IDisposable
         output.ShouldContain("data[0].json");
     }
 
-    // --- .gitignore opt-in ---
+    // --- .gitignore defaults and override ---
 
     [Test]
-    public async Task GitIgnore_IsOptIn()
+    public async Task IncludeIgnored_SearchesIgnoredDirectories()
     {
+        CreateDir(".git");
         CreateDir("bin");
         CreateFile("bin/generated.dll");
+        CreateFile("bin/unrelated.txt");
         File.WriteAllText(Path.Combine(_tempDir, ".gitignore"), "bin/\n");
 
-        var (output, _) = await Run(_tempDir);
+        var (output, _) = await Run(_tempDir, "--include-ignored", "--name", "*.dll");
         output.ShouldContain("generated.dll");
+        output.ShouldNotContain("unrelated.txt");
     }
 
     [Test]
-    public async Task GitIgnore_SkipsIgnoredDirectories()
+    [Arguments("")]
+    [Arguments("-i")]
+    [Arguments("--gitignore")]
+    public async Task GitIgnore_SkipsIgnoredDirectories(string option)
     {
         Directory.CreateDirectory(Path.Combine(_tempDir, ".git"));
         CreateDir("bin");
@@ -376,8 +382,12 @@ public class FindCommandTests : IDisposable
         CreateFile("src/main.cs");
         File.WriteAllText(Path.Combine(_tempDir, ".gitignore"), "bin/\n");
 
-        var (output, _) = await Run(_tempDir, "--gitignore");
+        CreateFile(".git/config");
+
+        var (output, _) = await Run(option.Length == 0 ? [_tempDir] : [_tempDir, option]);
         output.ShouldNotContain("generated.dll");
+        output.ShouldNotContain(".git/");
+        output.ShouldNotContain("config");
         output.ShouldContain("main.cs");
     }
 
@@ -389,7 +399,18 @@ public class FindCommandTests : IDisposable
         CreateFile("bin/generated.dll");
         File.WriteAllText(Path.Combine(_tempDir, ".gitignore"), "bin/\n");
 
-        var (output, _) = await Run(Path.Combine(_tempDir, "bin"), "-i");
+        var (output, _) = await Run(Path.Combine(_tempDir, "bin"));
         output.ShouldBe("No matches found.");
+    }
+
+    [Test]
+    public async Task IncludeIgnored_SearchesExplicitIgnoredRoot()
+    {
+        CreateDir(".git");
+        CreateFile("bin/generated.dll");
+        File.WriteAllText(Path.Combine(_tempDir, ".gitignore"), "bin/\n");
+
+        var (output, _) = await Run(Abs("bin"), "--include-ignored");
+        output.ShouldContain("generated.dll");
     }
 }
