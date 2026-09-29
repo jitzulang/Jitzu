@@ -18,7 +18,7 @@ public class ReadLine(
     Func<string, string?>? inlineHintProvider = null,
     Func<string, string>? historyPathResolver = null)
 {
-    private static readonly SearchValues<char> BoundaryValues = SearchValues.Create("\\/ ");
+    private readonly WordSegmenter _wordSegmenter = new();
 
     /// <summary>
     /// Calculates the visual cursor position after rendering plain text in a terminal,
@@ -284,7 +284,7 @@ public class ReadLine(
                         {
                             if ((key.Modifiers & ConsoleModifiers.Control) != 0)
                             {
-                                var endOfPreviousWord = JumpToLastBoundary(CollectionsMarshal.AsSpan(_buffer), _cursorPos);
+                                var endOfPreviousWord = _wordSegmenter.PreviousBoundary(CollectionsMarshal.AsSpan(_buffer), _cursorPos);
                                 _buffer.RemoveRange(endOfPreviousWord, _cursorPos - endOfPreviousWord);
                                 _cursorPos = endOfPreviousWord;
                             }
@@ -336,8 +336,7 @@ public class ReadLine(
 
                             if (key.Modifiers.HasFlag(ConsoleModifiers.Control))
                             {
-                                var view = CollectionsMarshal.AsSpan(_buffer);
-                                _cursorPos = JumpBack(view, _cursorPos);
+                                _cursorPos = _wordSegmenter.PreviousBoundary(CollectionsMarshal.AsSpan(_buffer), _cursorPos);
                             }
                             else
                             {
@@ -366,8 +365,7 @@ public class ReadLine(
 
                             if ((key.Modifiers & ConsoleModifiers.Control) != 0)
                             {
-                                var view = CollectionsMarshal.AsSpan(_buffer);
-                                _cursorPos = JumpForward(view, _cursorPos, _buffer.Count);
+                                _cursorPos = _wordSegmenter.NextBoundary(CollectionsMarshal.AsSpan(_buffer), _cursorPos);
                             }
                             else
                             {
@@ -582,58 +580,6 @@ public class ReadLine(
     {
         args.Cancel = true;
         _cancelPressed = true;
-    }
-
-    private static int JumpToLastBoundary(Span<char> view, int cursorPos)
-    {
-        // Sdad    asd adasd
-        //           ^
-        //         ^
-        //        ^
-
-        view = view[..cursorPos];
-
-        var lastNonBoundary = view.LastIndexOfAnyExcept(BoundaryValues);
-        if (lastNonBoundary is -1)
-            return 0;
-
-        view = view[..lastNonBoundary];
-        return view.LastIndexOfAny(BoundaryValues) + 1;
-    }
-
-    private static int JumpBack(ReadOnlySpan<char> view, int cursorPos)
-    {
-        // Sdad    asd adasd
-        //          ^
-        //     ^
-        // ^
-
-        view = view[..cursorPos];
-        var boundaryEnd = view.LastIndexOfAnyExcept(BoundaryValues);
-        if (boundaryEnd is -1)
-            return 0;
-
-        view = view[..boundaryEnd];
-        return view.LastIndexOfAny(BoundaryValues) + 1;
-    }
-
-    private static int JumpForward(ReadOnlySpan<char> view, int cursorPos, int maxIndex)
-    {
-        // Sdad asd    adasd
-        //       ^
-        //         ^
-        //             ^
-
-        var firstBoundary = view[cursorPos..].IndexOfAny(BoundaryValues);
-        if (firstBoundary == -1)
-            return maxIndex;
-
-        cursorPos = firstBoundary + cursorPos;
-        var firstNonBoundary = view[cursorPos..].IndexOfAnyExcept(BoundaryValues);
-        if (firstNonBoundary is -1)
-            return maxIndex;
-
-        return firstNonBoundary + cursorPos;
     }
 
     private void ClearCompletions()

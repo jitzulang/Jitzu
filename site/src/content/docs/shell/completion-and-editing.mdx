@@ -81,7 +81,7 @@ Duplicate commands are deduplicated — only the most recent occurrence is kept.
   </thead>
   <tbody>
     <tr><td><code>Left / Right</code></td><td>Move cursor one character</td></tr>
-    <tr><td><code>Ctrl+Left / Ctrl+Right</code></td><td>Jump by word</td></tr>
+    <tr><td><code>Ctrl+Left / Ctrl+Right</code></td><td>Jump by word. Paths, URLs, connection strings, <code>user@host</code> and <code>--option=value</code> split at their separators</td></tr>
     <tr><td><code>Home / Ctrl+A</code></td><td>Move to beginning of line</td></tr>
     <tr><td><code>End</code></td><td>Move to end of line</td></tr>
   </tbody>
@@ -98,7 +98,7 @@ Duplicate commands are deduplicated — only the most recent occurrence is kept.
   </thead>
   <tbody>
     <tr><td><code>Backspace</code></td><td>Delete character before cursor</td></tr>
-    <tr><td><code>Ctrl+Backspace</code></td><td>Delete word before cursor</td></tr>
+    <tr><td><code>Ctrl+Backspace</code></td><td>Delete word before cursor. Separators directly before the cursor go with the word preceding them (<code>git:personal</code> becomes <code>git:</code>, then empty)</td></tr>
     <tr><td><code>Delete</code></td><td>Delete character after cursor</td></tr>
   </tbody>
 </table>
