@@ -40,6 +40,9 @@ Built-in Commands:
   sort [-r/-n/-u]  - Sort lines in a file
   uniq [-c/-d] f   - Remove consecutive duplicate lines
   find path [opts] - Recursive file search
+                   defaults: .git; Rust: release; .NET: bin,obj; Node: node_modules
+                   JITZU_FIND_IGNORE replaces project-aware defaults
+                   --include-ignored  search all folders
                    -i, --gitignore  skip directories ignored by .gitignore
                    -name pattern  filename pattern
                    -type f|d      files or directories

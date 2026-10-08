@@ -9,13 +9,21 @@ namespace Jitzu.Shell.Core.Commands;
 /// </summary>
 public class FindCommand : CommandBase
 {
-    public FindCommand(CommandContext context) : base(context) { }
+    private readonly Func<string?> _getIgnoreList;
+
+    public FindCommand(CommandContext context)
+        : this(context, () => Environment.GetEnvironmentVariable("JITZU_FIND_IGNORE")) { }
+
+    internal FindCommand(CommandContext context, Func<string?> getIgnoreList) : base(context)
+    {
+        _getIgnoreList = getIgnoreList;
+    }
 
     public override Task<ShellResult> ExecuteAsync(ReadOnlyMemory<string> args)
     {
         if (args.Length == 0)
             return Task.FromResult(new ShellResult(ResultType.Error, "",
-                new Exception("Usage: find <path> [-name|--name pattern] [-type|--type f|d] [-ext|--ext .cs] [--include-ignored]")));
+                new Exception("Usage: find <path> [-name|--name pattern] [-type|--type f|d] [-ext|--ext .cs] [-i|--gitignore] [--include-ignored]")));
 
         try
         {
@@ -23,7 +31,8 @@ public class FindCommand : CommandBase
             string? namePattern = null;
             string? extension = null;
             char? typeFilter = null; // 'f' for file, 'd' for directory
-            var useGitIgnore = true;
+            var useGitIgnore = false;
+            var includeIgnored = false;
 
             for (var i = 0; i < args.Length; i++)
             {
@@ -31,7 +40,7 @@ public class FindCommand : CommandBase
                 switch (arg)
                 {
                     case "--include-ignored":
-                        useGitIgnore = false;
+                        includeIgnored = true;
                         break;
                     case "-i":
                     case "--gitignore":
@@ -80,9 +89,20 @@ public class FindCommand : CommandBase
             var dirColor = Theme["ls.directory"];
             var reset = ThemeConfig.Reset;
             var count = 0;
-            var ignoreMatcher = useGitIgnore ? GitIgnoreMatcher.TryCreate(fullPath) : null;
+            var ignoreMatcher = useGitIgnore && !includeIgnored ? GitIgnoreMatcher.TryCreate(fullPath) : null;
+            var configuredIgnores = includeIgnored ? null : _getIgnoreList();
+            var ignoredFolders = configuredIgnores?
+                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries) ?? [];
+            var projectIgnores = !includeIgnored && configuredIgnores is null
+                ? new ProjectDirectoryIgnoreMatcher()
+                : null;
 
-            foreach (var entry in EnumerateEntries(fullPath, ignoreMatcher))
+            bool IsIgnoredDirectory(string path) =>
+                ignoredFolders.Any(pattern => MatchGlob(Path.GetFileName(Path.TrimEndingDirectorySeparator(path)), pattern)) ||
+                projectIgnores?.IsIgnoredDirectory(path) == true ||
+                ignoreMatcher?.IsIgnoredDirectory(path) == true;
+
+            foreach (var entry in EnumerateEntries(fullPath, IsIgnoredDirectory))
             {
                 var isDir = Directory.Exists(entry);
                 var name = Path.GetFileName(entry);
@@ -131,10 +151,10 @@ public class FindCommand : CommandBase
     private static bool MatchGlob(string name, string pattern) =>
         FileSystemName.MatchesSimpleExpression(pattern, name, ignoreCase: true);
 
-    private static IEnumerable<string> EnumerateEntries(string root, GitIgnoreMatcher? ignoreMatcher)
+    private static IEnumerable<string> EnumerateEntries(string root, Func<string, bool> isIgnoredDirectory)
     {
         var pending = new Stack<string>();
-        if (ignoreMatcher?.IsIgnoredDirectory(root) == true)
+        if (isIgnoredDirectory(root))
             yield break;
         pending.Push(root);
 
@@ -154,13 +174,72 @@ public class FindCommand : CommandBase
             foreach (var entry in entries)
             {
                 var isDirectory = Directory.Exists(entry);
-                if (isDirectory && ignoreMatcher?.IsIgnoredDirectory(entry) == true)
+                if (isDirectory && isIgnoredDirectory(entry))
                     continue;
 
                 yield return entry;
                 if (isDirectory)
                     pending.Push(entry);
             }
+        }
+    }
+
+    private sealed class ProjectDirectoryIgnoreMatcher
+    {
+        [Flags]
+        private enum ProjectKind { None = 0, Rust = 1, DotNet = 2, Node = 4 }
+
+        private readonly Dictionary<string, ProjectKind> _contexts = new(
+            OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+        public bool IsIgnoredDirectory(string path)
+        {
+            path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            var name = Path.GetFileName(path);
+            if (name.Equals(".git", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Only inspect project markers when this folder could be excluded.
+            var kind = name.ToLowerInvariant() switch
+            {
+                "release" => ProjectKind.Rust,
+                "bin" or "obj" => ProjectKind.DotNet,
+                "node_modules" => ProjectKind.Node,
+                _ => ProjectKind.None
+            };
+            return kind != ProjectKind.None && (GetContext(Path.GetDirectoryName(path)) & kind) != 0;
+        }
+
+        private ProjectKind GetContext(string? directory)
+        {
+            if (directory is null)
+                return ProjectKind.None;
+            if (_contexts.TryGetValue(directory, out var cached))
+                return cached;
+
+            // Inherit within a project, but do not import rules from outside a repository.
+            var gitPath = Path.Combine(directory, ".git");
+            var context = Directory.Exists(gitPath) || File.Exists(gitPath)
+                ? ProjectKind.None
+                : GetContext(Path.GetDirectoryName(directory));
+
+            if (File.Exists(Path.Combine(directory, "Cargo.toml")))
+                context |= ProjectKind.Rust;
+            if (File.Exists(Path.Combine(directory, "package.json")))
+                context |= ProjectKind.Node;
+            try
+            {
+                if (Directory.EnumerateFiles(directory).Any(file =>
+                        Path.GetExtension(file).ToLowerInvariant() is ".csproj" or ".fsproj" or ".vbproj" or ".sln" or ".slnx"))
+                    context |= ProjectKind.DotNet;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // An unreadable ancestor should not prevent searching an accessible child.
+            }
+
+            _contexts[directory] = context;
+            return context;
         }
     }
 

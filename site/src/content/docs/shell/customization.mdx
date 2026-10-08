@@ -135,6 +135,43 @@ fun greet(): String {
 
 Lines starting with `//` are treated as comments and skipped.
 
+## Find Ignore List
+
+`find` skips `.git` and detects project types to exclude their generated folders:
+
+| Project marker | Folders skipped |
+| --- | --- |
+| `Cargo.toml` (Rust) | `release` |
+| `*.csproj`, `*.fsproj`, `*.vbproj`, `*.sln`, `*.slnx` (.NET) | `bin`, `obj` |
+| `package.json` (Node) | `node_modules` |
+
+Markers apply to their folder and descendants, including searches started inside
+a project. Nested projects are detected during traversal, so sibling projects
+keep their own rules. Multiple project types can apply together. Detection stops
+at repository boundaries. Without a matching project marker, these folder names
+remain searchable.
+
+`dist` remains searchable, even when it is listed in `.gitignore`.
+
+Set `JITZU_FIND_IGNORE` in `~/.jitzu/config.jz` to replace all project-aware defaults:
+
+<CodeBlock language="shell" code={`export JITZU_FIND_IGNORE=".git,node_modules,.cache"
+`} />
+
+The comma-separated patterns match folder names at any depth and support `*` and
+`?` wildcards. They do not exclude files with matching names. Changes made with
+`export` take effect on the next search. Use `export JITZU_FIND_IGNORE=","` for
+an empty list, or `unset JITZU_FIND_IGNORE` to restore the defaults.
+
+<CodeBlock language="shell" code={`find . --name "Float.Setup.exe"
+find . --name "Float.Setup.exe" --include-ignored
+find . --gitignore`} />
+
+`--gitignore` (or `-i`) additionally enables the repository's `.gitignore` folder
+filter. `--include-ignored` bypasses both filters, regardless of flag order.
+For `jz -c`, which does not execute `config.jz`, set the environment variable in
+the calling shell.
+
 ## Aliases
 
 Aliases map short names to longer commands. They persist to disk across sessions

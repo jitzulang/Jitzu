@@ -17,7 +17,7 @@ public class FindCommandTests : IDisposable
 
         var theme = ThemeConfig.CreateDefault();
         var context = new CommandContext(new ShellSession(), theme);
-        _cmd = new FindCommand(context);
+        _cmd = new FindCommand(context, () => null);
     }
 
     public void Dispose()
@@ -42,6 +42,14 @@ public class FindCommandTests : IDisposable
     private async Task<(string Output, ResultType Type)> Run(params string[] args)
     {
         var result = await _cmd.ExecuteAsync(args);
+        return (StripAnsi(result.Output ?? ""), result.Type);
+    }
+
+    private async Task<(string Output, ResultType Type)> RunWithIgnoreList(string ignoreList, params string[] args)
+    {
+        var context = new CommandContext(new ShellSession(), ThemeConfig.CreateDefault());
+        var command = new FindCommand(context, () => ignoreList);
+        var result = await command.ExecuteAsync(args);
         return (StripAnsi(result.Output ?? ""), result.Type);
     }
 
@@ -354,7 +362,170 @@ public class FindCommandTests : IDisposable
         output.ShouldContain("data[0].json");
     }
 
-    // --- .gitignore defaults and override ---
+    // --- Configured ignores and optional .gitignore ---
+
+    [Test]
+    [Arguments("Cargo.toml", "release")]
+    [Arguments("Cargo.toml", "target/release")]
+    [Arguments("App.csproj", "bin")]
+    [Arguments("App.csproj", "obj")]
+    [Arguments("App.sln", "src/App/obj")]
+    [Arguments("App.slnx", "src/App/bin")]
+    [Arguments("package.json", "node_modules")]
+    public async Task ProjectDefaults_SkipGeneratedFoldersAndAllowOverrides(string marker, string ignoredFolder)
+    {
+        CreateDir(".git");
+        CreateFile(marker);
+        CreateFile($"{ignoredFolder}/generated.txt");
+        CreateFile("dist/Float.Setup.exe");
+
+        var (output, type) = await Run(_tempDir);
+        type.ShouldBe(ResultType.OsCommand);
+        output.ShouldNotContain("generated.txt");
+        output.ShouldContain("Float.Setup.exe");
+
+        var (included, _) = await Run(_tempDir, "--include-ignored");
+        included.ShouldContain("generated.txt");
+
+        var (custom, _) = await RunWithIgnoreList(".git", _tempDir);
+        custom.ShouldContain("generated.txt");
+    }
+
+    [Test]
+    public async Task NoProjectMarkers_KeepOrdinaryFoldersSearchable()
+    {
+        CreateDir(".git");
+        CreateFile("release/rust.txt");
+        CreateFile("bin/binary.txt");
+        CreateFile("obj/object.txt");
+        CreateFile("node_modules/module.txt");
+
+        var (output, _) = await Run(_tempDir);
+        output.ShouldContain("rust.txt");
+        output.ShouldContain("binary.txt");
+        output.ShouldContain("object.txt");
+        output.ShouldContain("module.txt");
+    }
+
+    [Test]
+    public async Task NestedSearch_InheritsProjectMarkersFromAncestors()
+    {
+        CreateFile("Cargo.toml");
+        CreateFile("target/release/generated.txt");
+        CreateFile("target/debug/visible.txt");
+
+        var (output, _) = await Run(Abs("target"));
+        output.ShouldNotContain("generated.txt");
+        output.ShouldContain("visible.txt");
+
+        var (ignoredRoot, _) = await Run(Abs("target/release"));
+        ignoredRoot.ShouldBe("No matches found.");
+    }
+
+    [Test]
+    public async Task NestedProjects_ApplyRulesOnlyToTheirOwnSubtrees()
+    {
+        CreateDir(".git");
+        CreateFile("backend/App.csproj");
+        CreateFile("backend/bin/dotnet-generated.txt");
+        CreateFile("frontend/package.json");
+        CreateFile("frontend/node_modules/node-generated.txt");
+        CreateFile("frontend/bin/node-script.txt");
+        CreateFile("native/Cargo.toml");
+        CreateFile("native/release/rust-generated.txt");
+        CreateFile("docs/release/release-notes.txt");
+
+        var (output, _) = await Run(_tempDir);
+        output.ShouldNotContain("dotnet-generated.txt");
+        output.ShouldNotContain("node-generated.txt");
+        output.ShouldNotContain("rust-generated.txt");
+        output.ShouldContain("node-script.txt");
+        output.ShouldContain("release-notes.txt");
+    }
+
+    [Test]
+    public async Task MixedProject_CombinesDetectedRules()
+    {
+        CreateFile("App.csproj");
+        CreateFile("package.json");
+        CreateFile("Cargo.toml");
+        CreateFile("obj/dotnet-generated.txt");
+        CreateFile("node_modules/node-generated.txt");
+        CreateFile("release/rust-generated.txt");
+        CreateFile("dist/Float.Setup.exe");
+
+        var (output, _) = await Run(_tempDir);
+        output.ShouldNotContain("generated.txt");
+        output.ShouldContain("Float.Setup.exe");
+    }
+
+    [Test]
+    public async Task NestedRepository_DoesNotInheritOuterProjectRules()
+    {
+        CreateFile("App.csproj");
+        CreateFile("nested/.git"); // Worktree-style repository marker.
+        CreateFile("nested/bin/visible.txt");
+
+        var (output, _) = await Run(Abs("nested"));
+        output.ShouldContain("visible.txt");
+    }
+
+    [Test]
+    public async Task Defaults_SkipNoiseButFindGitignoredBuildArtifacts()
+    {
+        CreateFile("package.json");
+        CreateFile(".git/config");
+        CreateFile("nested/node_modules/dependency.js");
+        CreateFile("dist/Float.Setup.exe");
+        File.WriteAllText(Abs(".gitignore"), "dist/\n");
+
+        var (output, _) = await Run(_tempDir);
+        output.ShouldContain(Path.Combine("dist", "Float.Setup.exe"));
+        output.ShouldNotContain("dependency.js");
+        output.ShouldNotContain("config");
+    }
+
+    [Test]
+    public async Task ConfiguredPatterns_ReplaceDefaultsAndOnlyExcludeDirectories()
+    {
+        CreateFile("nested/cache-data/hidden.txt");
+        CreateFile("obj/generated.dll");
+        CreateFile("node_modules/visible.js");
+        CreateFile("cache-file.txt");
+
+        var (output, _) = await RunWithIgnoreList(" cache*, obj, , ", _tempDir);
+        output.ShouldNotContain("hidden.txt");
+        output.ShouldNotContain("generated.dll");
+        output.ShouldContain("visible.js");
+        output.ShouldContain("cache-file.txt");
+    }
+
+    [Test]
+    [Arguments("")]
+    [Arguments(",")]
+    public async Task EmptyIgnoreList_DisablesDefaultExclusions(string ignoreList)
+    {
+        CreateFile("node_modules/visible.js");
+        var (output, _) = await RunWithIgnoreList(ignoreList, _tempDir);
+        output.ShouldContain("visible.js");
+    }
+
+    [Test]
+    [Arguments(true)]
+    [Arguments(false)]
+    public async Task IncludeIgnored_OverridesConfigAndGitIgnoreInEitherOrder(bool includeFirst)
+    {
+        CreateDir(".git");
+        CreateFile("cache/cached.txt");
+        CreateFile("dist/Float.Setup.exe");
+        File.WriteAllText(Abs(".gitignore"), "dist/\n");
+
+        var (output, _) = await RunWithIgnoreList("cache", _tempDir,
+            includeFirst ? "--include-ignored" : "--gitignore",
+            includeFirst ? "--gitignore" : "--include-ignored");
+        output.ShouldContain("cached.txt");
+        output.ShouldContain("Float.Setup.exe");
+    }
 
     [Test]
     public async Task IncludeIgnored_SearchesIgnoredDirectories()
@@ -371,7 +542,6 @@ public class FindCommandTests : IDisposable
     }
 
     [Test]
-    [Arguments("")]
     [Arguments("-i")]
     [Arguments("--gitignore")]
     public async Task GitIgnore_SkipsIgnoredDirectories(string option)
@@ -384,7 +554,7 @@ public class FindCommandTests : IDisposable
 
         CreateFile(".git/config");
 
-        var (output, _) = await Run(option.Length == 0 ? [_tempDir] : [_tempDir, option]);
+        var (output, _) = await Run(_tempDir, option);
         output.ShouldNotContain("generated.dll");
         output.ShouldNotContain(".git/");
         output.ShouldNotContain("config");
@@ -399,7 +569,7 @@ public class FindCommandTests : IDisposable
         CreateFile("bin/generated.dll");
         File.WriteAllText(Path.Combine(_tempDir, ".gitignore"), "bin/\n");
 
-        var (output, _) = await Run(Path.Combine(_tempDir, "bin"));
+        var (output, _) = await Run(Path.Combine(_tempDir, "bin"), "--gitignore");
         output.ShouldBe("No matches found.");
     }
 
