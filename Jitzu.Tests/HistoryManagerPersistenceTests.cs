@@ -77,6 +77,9 @@ public class HistoryManagerPersistenceTests
             (await File.ReadAllTextAsync(path)).ShouldBe("external\n");
             history.PersistenceWarning.ShouldNotBeNull();
             Directory.GetFiles(directory, "*.rejected").ShouldHaveSingleItem();
+
+            history.QueueWrite("after-conflict");
+            history[history.Count - 1].ShouldBe("after-conflict");
         }
         finally
         {

@@ -401,20 +401,8 @@ static async Task RunReplAsync(JitzuOptions options)
             if (line.Trim() is "exit" or "quit")
                 return;
 
-            if (isInteractive && history.PersistenceWarning is null)
-            {
-                try
-                {
-                    if (persist)
-                        history.QueueWrite(line);
-                    else
-                        history.Record(line);
-                }
-                catch (Exception ex) when (ex is IOException or InvalidOperationException)
-                {
-                    Console.Error.WriteLine($"Warning: history is now read-only: {ex.Message}");
-                }
-            }
+            if (isInteractive)
+                history.QueueWrite(line);
 
             var sw = Stopwatch.StartNew();
             var result = await strategy.ExecuteAsync(line);
