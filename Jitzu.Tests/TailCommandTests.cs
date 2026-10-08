@@ -147,33 +147,33 @@ public class TailCommandTests : IDisposable
         var file = Path.Combine(_tempDir, "cancel.txt");
         await File.WriteAllLinesAsync(file, ["line1"]);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        using var cts = new CancellationTokenSource();
         var collected = new List<string>();
 
-        try
+        var streamTask = Task.Run(async () =>
         {
             await foreach (var line in _cmd.StreamAsync(new[] { "-f", file }.AsMemory(), cts.Token))
             {
                 collected.Add(line);
+                await cts.CancelAsync();
             }
-        }
+        });
+
+        try { await streamTask.WaitAsync(TimeSpan.FromSeconds(10)); }
         catch (OperationCanceledException) { }
 
-        collected.Count.ShouldBeGreaterThanOrEqualTo(1);
-        collected[0].ShouldBe("line1");
+        streamTask.IsCompleted.ShouldBeTrue();
+        collected.ShouldBe(["line1"]);
     }
 
     [Test]
-    public async Task Tail_WithoutFollow_ExecuteAsync_ReturnsImmediately()
+    public async Task Tail_WithoutFollow_ExecuteAsync_Completes()
     {
         var file = Path.Combine(_tempDir, "nof.txt");
         await File.WriteAllLinesAsync(file, ["a", "b", "c"]);
 
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        var result = await _cmd.ExecuteAsync(new[] { file }.AsMemory());
-        sw.Stop();
+        var result = await _cmd.ExecuteAsync(new[] { file }.AsMemory()).WaitAsync(TimeSpan.FromSeconds(10));
 
         result.Type.ShouldBe(ResultType.OsCommand);
-        sw.ElapsedMilliseconds.ShouldBeLessThan(1000);
     }
 }

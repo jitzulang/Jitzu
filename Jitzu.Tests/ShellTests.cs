@@ -35,8 +35,7 @@ public class ShellTests
         await harness.SendCommandAndWaitAsync("cd /");
         var output = await harness.SendCommandAsync("pwd");
 
-        // On Windows, "cd /" goes to the drive root (e.g. "D:\"), on Unix it's "/"
-        output.ShouldContain(Path.GetPathRoot(Environment.CurrentDirectory)!.TrimEnd(Path.DirectorySeparatorChar));
+        output.ShouldContain(Path.GetPathRoot(Path.GetTempPath())!.TrimEnd(Path.DirectorySeparatorChar));
     }
 
     [Test]
