@@ -45,7 +45,30 @@ Download pre-built binaries from the [releases page](https://github.com/jitzulan
 
 Extract the zip and add `jz` to your PATH.
 
+### Arch Linux
+
+Download the `jz-bin-{version}-1-x86_64.pkg.tar.zst` package from the
+[releases page](https://github.com/jitzulang/jitzu/releases), then install it:
+
+```sh
+sudo pacman -U ./jz-bin-*-x86_64.pkg.tar.zst
+```
+
+Use the exact downloaded filename if you have multiple versions. This package
+contains the same self-contained Linux x64 binary as the ZIP; no separate .NET
+runtime is required. It is a standalone, unsigned package, not a hosted pacman
+repository: `pacman -Syu` will not discover new Jitzu releases automatically.
+Download and install newer packages with `pacman -U`, or use the existing AUR
+package (`yay -S jz-bin`) and update through your AUR helper. Signed repository
+publication is configured in release CI, and `packages.jitzu.dev` hosting is
+provisioned, but no repository objects or public signing key have been published
+yet. See [repository setup and future installation instructions](packaging/arch/REPOSITORY.md)
+before configuring pacman; do not treat the repository as live yet.
+
 ### Self-Update
+
+For pacman-managed installations, use the package update methods above rather
+than replacing the managed binary with `jz upgrade`.
 
 ```sh
 jz upgrade
