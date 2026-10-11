@@ -1,10 +1,14 @@
 # Signed pacman repository
 
-Hosting is provisioned, but **no objects have been published yet**. The R2
-bucket `jitzu-packages` belongs to account
+The signed x86_64 repository is live at `https://packages.jitzu.dev/arch/x86_64`,
+starting with **v0.1.50**. Its database and package signatures were verified from
+the public endpoint, including a download-only pacman check with required
+package and database signatures in an isolated keyring/database.
+
+The R2 bucket `jitzu-packages` belongs to account
 `5291daa21d5bfc2aa14cd567d33fc550`; `packages.jitzu.dev` is attached with minimum
-TLS 1.2. This is not yet a live signed repository. The five production GitHub
-Actions secrets are configured. The dedicated signing key's public fingerprint is:
+TLS 1.2. The five production GitHub Actions secrets are configured. The dedicated
+signing key's public fingerprint is:
 
 ```text
 A239257C5BF7E6D68EF823C48E1ADE54F78F6A5B
@@ -51,7 +55,7 @@ retry after publication/re-run completes; never disable signature verification.
 Metadata uses `no-cache`; deployment assumes no overriding edge cache rule.
 Same-version reruns skip; do not overwrite an existing version's package.
 
-## Installation — only after first successful publication
+## Installation
 
 Download `https://packages.jitzu.dev/arch/x86_64/jitzu-signing-key.asc`.
 Inspect the fingerprint with `gpg --show-keys --with-fingerprint
@@ -76,8 +80,8 @@ Server = https://packages.jitzu.dev/arch/$arch
 sudo pacman -Syu jz-bin
 ```
 
-This repository supports x86_64 only. Until the key/fingerprint and signed
-metadata are available, use GitHub release downloads or `yay -S jz-bin`.
+This repository supports x86_64 only. GitHub release downloads and
+`yay -S jz-bin` remain available as alternatives.
 
 ## Local validation
 

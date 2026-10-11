@@ -59,11 +59,12 @@ contains the same self-contained Linux x64 binary as the ZIP; no separate .NET
 runtime is required. It is a standalone, unsigned package, not a hosted pacman
 repository: `pacman -Syu` will not discover new Jitzu releases automatically.
 Download and install newer packages with `pacman -U`, or use the existing AUR
-package (`yay -S jz-bin`) and update through your AUR helper. Signed repository
-publication is configured in release CI, and `packages.jitzu.dev` hosting is
-provisioned, but no repository objects or public signing key have been published
-yet. See [repository setup and future installation instructions](packaging/arch/REPOSITORY.md)
-before configuring pacman; do not treat the repository as live yet.
+package (`yay -S jz-bin`) and update through your AUR helper.
+
+A signed x86_64 pacman repository is also available at `packages.jitzu.dev`,
+starting with v0.1.50. Follow the [signed repository installation instructions](packaging/arch/REPOSITORY.md)
+to verify and trust the signing key and configure pacman. With that repository
+configured, install and update using `sudo pacman -Syu jz-bin`.
 
 ### Self-Update
 
