@@ -29,7 +29,7 @@ import CodeBlock from '@/components/CodeBlock.astro';
     <tr><td><code>stat file</code></td><td>Display file metadata</td></tr>
     <tr><td><code>chmod +/-r file</code></td><td>Toggle file attributes (r/h/s)</td></tr>
     <tr><td><code>unblock [-a|--attributes-only] path</code></td><td>Clear delete-blocking attributes and terminate locking processes; use <code>-a</code> to preserve processes</td></tr>
-    <tr><td><code>find path [opts]</code></td><td>Recursive file search</td></tr>
+    <tr><td><code>find [pattern] [path...]</code></td><td>Recursive filename search (fd-style)</td></tr>
     <tr><td><code>du [-sh] [dir]</code></td><td>Disk usage of files/directories</td></tr>
     <tr><td><code>df</code></td><td>Show disk space of mounted drives</td></tr>
     <tr><td><code>mktemp [-d]</code></td><td>Create temporary file or directory</td></tr>
@@ -50,13 +50,30 @@ d-----       -  Jan 10 11:20  tests/
 
 ## find
 
-Recursive file search with filtering by name pattern, type, and extension:
+`find` uses fd-style syntax: the first argument is a filename pattern, followed by
+optional search directories. With no arguments it lists the current directory
+recursively. Patterns are regular expressions, with case-insensitive matching
+unless the pattern contains an uppercase character. Hidden entries and files
+matched by `.gitignore` (in Git repositories), `.ignore`, and `.fdignore` are
+skipped by default. Repository `.git/info/exclude` rules are also respected.
 
-<CodeBlock language="shell" code={`> find src -ext cs
+<CodeBlock language="shell" code={`> find -e cs . src
 src/Parser.cs
 src/Lexer.cs
 src/Interpreter.cs
 
-> find . -name "*.json" -type f
-./config.json
-./package.json`} />
+> find -g "*.json" -t f
+config.json
+package.json
+
+> find readme
+README.md`} />
+
+Use `-g` for glob patterns, `-F` for literal text, `-i` or `-s` to override case
+matching, and `-t f|d|l` to filter by file, directory, or symbolic link. Repeat
+`-e` to match multiple extensions. `-H` includes hidden entries, `-I` disables
+ignore rules, and `-HI` or `-u` includes both. `-p` matches the full absolute path,
+`-a` prints absolute paths, `-d` limits depth, and `-E` excludes a glob. Quote
+patterns containing shell metacharacters. Symbolic-link directories are listed
+without traversal. Searches return all matches and print nothing when there are
+no matches. Run `find --help` for supported options.

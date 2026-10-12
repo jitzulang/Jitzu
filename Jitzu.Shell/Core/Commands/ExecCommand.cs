@@ -14,7 +14,7 @@ public class ExecCommand(CommandContext context) : CommandBase(context)
 
     // Display managers use shell quoting, including single quotes and escaped
     // spaces. System.CommandLine's splitter only understands double quotes.
-    internal static string[] SplitArguments(string command)
+    internal static string[] SplitArguments(string command, string commandName = "exec")
     {
         var args = new List<string>();
         var word = new StringBuilder();
@@ -48,7 +48,7 @@ public class ExecCommand(CommandContext context) : CommandBase(context)
             if (ch == '\\' && quote != '\'')
             {
                 if (i + 1 == command.Length)
-                    throw new ArgumentException("exec: trailing escape");
+                    throw new ArgumentException($"{commandName}: trailing escape");
                 var next = command[i + 1];
                 if (quote == '\0' || next is '$' or '`' or '"' or '\\' or '\n')
                 {
@@ -61,7 +61,7 @@ public class ExecCommand(CommandContext context) : CommandBase(context)
         }
 
         if (quote != '\0')
-            throw new ArgumentException("exec: unterminated quote");
+            throw new ArgumentException($"{commandName}: unterminated quote");
         if (started) args.Add(word.ToString());
         return args.ToArray();
     }

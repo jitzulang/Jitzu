@@ -85,7 +85,7 @@ c3d4e5f Fix parser edge case
 Map file paths to line counts with `wc --files`, then reduce the numeric stream. For example,
 this computes the average lines per C# file:
 
-<CodeBlock language="shell" code={`> find . -type f -ext .cs | wc -l --files | avg
+<CodeBlock language="shell" code={`> find -t f -e cs | wc -l --files | avg
 187.4`} />
 
 ## Builtin Pipes
@@ -94,7 +94,7 @@ Built-in commands can also be piped. Their output is captured and fed into the r
 
 <CodeBlock language="shell" code={`> diff file1.txt file2.txt | more
 > cat server.log | grep("ERROR")
-> find src -ext cs | sort`} />
+> find -e cs . src | sort`} />
 
 ## Output Redirection
 

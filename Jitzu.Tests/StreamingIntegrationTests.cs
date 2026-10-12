@@ -169,7 +169,7 @@ public class StreamingIntegrationTests
             await File.WriteAllTextAsync(Path.Combine(directory, "ignored.txt"), "one\n");
 
             var output = await RunCommandAsync(
-                $"find \"{directory}\" -type f -ext .cs | wc -l --files | avg");
+                $"find . \"{directory}\" -t f -e cs | wc -l --files | avg");
 
             output.ShouldBe("3");
         }

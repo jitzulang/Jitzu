@@ -112,11 +112,12 @@ with a `|` continuation prompt:
 
 Arguments containing `*` or `?` are
 expanded to matching file paths. Recursive `**` patterns are also supported.
+The `find` builtin handles its own patterns; use `-g` and quote the pattern.
 
 <CodeBlock language="shell" code={`> ls *.cs
 Program.cs  Lexer.cs  Parser.cs
 
-> find src/**/*.cs
+> find -g '*.cs' src
 src/Core/Compiler.cs
 src/Core/Interpreter.cs
 src/Runtime/Stack.cs`} />

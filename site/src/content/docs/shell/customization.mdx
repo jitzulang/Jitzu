@@ -135,42 +135,32 @@ fun greet(): String {
 
 Lines starting with `//` are treated as comments and skipped.
 
-## Find Ignore List
+## Find Ignore Rules
 
-`find` skips `.git` and detects project types to exclude their generated folders:
+`find` skips hidden entries and respects `.gitignore` rules in Git repositories,
+repository `.git/info/exclude`, and `.ignore` and `.fdignore` files. Rules can
+exclude files or directories, and nested ignore files and `!` negations are
+supported. `.fdignore` takes precedence over `.ignore`, which takes precedence
+over Git ignore rules.
 
-| Project marker | Folders skipped |
-| --- | --- |
-| `Cargo.toml` (Rust) | `release` |
-| `*.csproj`, `*.fsproj`, `*.vbproj`, `*.sln`, `*.slnx` (.NET) | `bin`, `obj` |
-| `package.json` (Node) | `node_modules` |
+To exclude generated folders, add patterns to your repository's `.gitignore`
+or a `.fdignore` file in the directory you search:
 
-Markers apply to their folder and descendants, including searches started inside
-a project. Nested projects are detected during traversal, so sibling projects
-keep their own rules. Multiple project types can apply together. Detection stops
-at repository boundaries. Without a matching project marker, these folder names
-remain searchable.
+<CodeBlock language="text" code={`node_modules/
+bin/
+obj/
+release/
+.cache/`} />
 
-`dist` remains searchable, even when it is listed in `.gitignore`.
+<CodeBlock language="shell" code={`find -F Float.Setup.exe
+find -I -F Float.Setup.exe
+find -HI
+find -E '*.bak'`} />
 
-Set `JITZU_FIND_IGNORE` in `~/.jitzu/config.jz` to replace all project-aware defaults:
-
-<CodeBlock language="shell" code={`export JITZU_FIND_IGNORE=".git,node_modules,.cache"
-`} />
-
-The comma-separated patterns match folder names at any depth and support `*` and
-`?` wildcards. They do not exclude files with matching names. Changes made with
-`export` take effect on the next search. Use `export JITZU_FIND_IGNORE=","` for
-an empty list, or `unset JITZU_FIND_IGNORE` to restore the defaults.
-
-<CodeBlock language="shell" code={`find . --name "Float.Setup.exe"
-find . --name "Float.Setup.exe" --include-ignored
-find . --gitignore`} />
-
-`--gitignore` (or `-i`) additionally enables the repository's `.gitignore` folder
-filter. `--include-ignored` bypasses both filters, regardless of flag order.
-For `jz -c`, which does not execute `config.jz`, set the environment variable in
-the calling shell.
+`-H` includes hidden entries, `-I` bypasses ignore files, and `-HI` or `-u`
+includes both hidden and ignored entries. `-E` excludes a glob for a single
+search, even with `-I`. The previous `JITZU_FIND_IGNORE` environment setting
+and `--include-ignored` option are replaced by ignore files and these flags.
 
 ## Aliases
 

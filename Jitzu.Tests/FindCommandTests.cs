@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Jitzu.Shell;
 using Jitzu.Shell.Core;
 using Jitzu.Shell.Core.Commands;
@@ -7,580 +8,394 @@ namespace Jitzu.Tests;
 
 public class FindCommandTests : IDisposable
 {
-    private readonly string _tempDir;
-    private readonly FindCommand _cmd;
+    private readonly string _tempDir = Path.Combine(Path.GetTempPath(), "jitzu_find_" + Guid.NewGuid().ToString("N"));
+    private readonly FindCommand _cmd = new(new CommandContext(new ShellSession(), ThemeConfig.CreateDefault()));
 
-    public FindCommandTests()
-    {
-        _tempDir = Path.Combine(Path.GetTempPath(), "jitzu_find_test_" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(_tempDir);
-
-        var theme = ThemeConfig.CreateDefault();
-        var context = new CommandContext(new ShellSession(), theme);
-        _cmd = new FindCommand(context, () => null);
-    }
-
-    public void Dispose()
-    {
-        try { Directory.Delete(_tempDir, true); } catch { }
-    }
-
-    private void CreateFile(string relativePath)
-    {
-        var full = Path.Combine(_tempDir, relativePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, "");
-    }
-
-    private void CreateDir(string relativePath)
-    {
-        Directory.CreateDirectory(Path.Combine(_tempDir, relativePath));
-    }
+    public FindCommandTests() => Directory.CreateDirectory(_tempDir);
+    public void Dispose() => Directory.Delete(_tempDir, recursive: true);
 
     private string Abs(string relative) => Path.Combine(_tempDir, relative);
 
-    private async Task<(string Output, ResultType Type)> Run(params string[] args)
+    private void CreateFile(string relative, string content = "")
     {
-        var result = await _cmd.ExecuteAsync(args);
-        return (StripAnsi(result.Output ?? ""), result.Type);
+        var path = Abs(relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, content);
     }
 
-    private async Task<(string Output, ResultType Type)> RunWithIgnoreList(string ignoreList, params string[] args)
+    private Task<ShellResult> Execute(string[] args) => _cmd.ExecuteAsync(args);
+
+    private async Task<string[]> Search(string pattern = "", params string[] flags)
     {
-        var context = new CommandContext(new ShellSession(), ThemeConfig.CreateDefault());
-        var command = new FindCommand(context, () => ignoreList);
-        var result = await command.ExecuteAsync(args);
-        return (StripAnsi(result.Output ?? ""), result.Type);
+        var result = await Execute([pattern, _tempDir, .. flags]);
+        result.Type.ShouldBe(ResultType.OsCommand, result.Error?.Message);
+        return (result.Output ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => Path.GetRelativePath(_tempDir, line.TrimEnd('\r', '/', '\\')).Replace('\\', '/'))
+            .Order(StringComparer.Ordinal).ToArray();
     }
 
-    private static string StripAnsi(string s) =>
-        System.Text.RegularExpressions.Regex.Replace(s, @"\e\[[^m]*m", "");
-
-    // --- Basic usage ---
+    private async Task<string> Shell(string command)
+    {
+        using var process = Process.Start(new ProcessStartInfo(ShellTestHarness.GetShellPath())
+        {
+            WorkingDirectory = _tempDir,
+            ArgumentList = { "-c", command },
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        })!;
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        try { await process.WaitForExitAsync(timeout.Token); }
+        catch { process.Kill(entireProcessTree: true); throw; }
+        (await stderr).ShouldBeEmpty();
+        process.ExitCode.ShouldBe(0);
+        return (await stdout).Trim();
+    }
 
     [Test]
-    public async Task NoArgs_ReturnsError()
+    public async Task NoArguments_RecursivelyListsCurrentDirectory()
     {
-        var (_, type) = await Run();
-        type.ShouldBe(ResultType.Error);
+        CreateFile("top.txt");
+        CreateFile("sub/deep.txt");
+        var output = await Shell("find");
+        output.ShouldContain("top.txt");
+        output.ShouldContain(Path.Combine("sub", "deep.txt"));
+        output.ShouldNotContain(_tempDir);
     }
 
     [Test]
-    public async Task NonexistentPath_ReturnsError()
+    public async Task SingleArgument_IsPatternInCurrentDirectory()
     {
-        var (_, type) = await Run(Abs("nonexistent"));
-        type.ShouldBe(ResultType.Error);
+        CreateFile("my-readme.md");
+        CreateFile("unrelated.txt");
+        (await Shell("find readme")).ShouldBe("my-readme.md");
     }
 
     [Test]
-    public async Task EmptyDirectory_ReturnsNoMatches()
+    public async Task PatternCanAlsoBeAnExistingDirectoryName()
     {
-        CreateDir("empty");
-        var (output, _) = await Run(Abs("empty"));
-        output.ShouldBe("No matches found.");
+        Directory.CreateDirectory(Abs("src"));
+        CreateFile("src/main.cs");
+        (await Shell("find src")).ShouldBe("src" + Path.DirectorySeparatorChar);
     }
 
-    // --- File discovery ---
+    [Test]
+    public async Task EmptyDirectory_ProducesEmptyOutput() => (await Search()).ShouldBeEmpty();
 
     [Test]
-    public async Task FindsFilesInSubdirectories()
+    public async Task NoMatches_ProducesEmptyOutput()
+    {
+        CreateFile("other.txt");
+        (await Search("missing")).ShouldBeEmpty();
+        (await Shell("find missing | wc -l")).ShouldBe("0");
+    }
+
+    [Test]
+    public async Task SearchesFilesAndDirectoriesRecursively()
     {
         CreateFile("a.txt");
-        CreateFile("sub/b.txt");
         CreateFile("sub/deep/c.txt");
-
-        var (output, _) = await Run(_tempDir);
-        output.ShouldContain("a.txt");
-        output.ShouldContain("b.txt");
-        output.ShouldContain("c.txt");
+        (await Search()).ShouldBe(["a.txt", "sub", "sub/deep", "sub/deep/c.txt"]);
     }
 
     [Test]
-    public async Task FindsDirectoriesInOutput()
+    public async Task PlainPattern_IsSubstringWithSmartCase()
     {
-        CreateDir("mydir");
-        CreateFile("mydir/file.txt");
-
-        var (output, _) = await Run(_tempDir);
-        output.ShouldContain("mydir/");
+        CreateFile("my-README.md");
+        CreateFile("readme.txt");
+        CreateFile("other.txt");
+        (await Search("readme")).ShouldBe(["my-README.md", "readme.txt"]);
+        (await Search("README")).ShouldBe(["my-README.md"]);
+        (await Search("README", "-i")).ShouldBe(["my-README.md", "readme.txt"]);
+        (await Search("readme", "-s")).ShouldBe(["readme.txt"]);
     }
 
-    // --- -type filter ---
-
     [Test]
-    public async Task TypeF_OnlyReturnsFiles()
+    public async Task RegexPattern_UsesAnchorsAndAlternatives()
     {
-        CreateDir("dir1");
-        CreateFile("dir1/file.txt");
-
-        var (output, _) = await Run(_tempDir, "-type", "f");
-        output.ShouldContain("file.txt");
-        output.ShouldNotContain("dir1/\n");
+        CreateFile("test1.cs");
+        CreateFile("test2.rs");
+        CreateFile("testx.cs");
+        (await Search(@"^test[12]\.(cs|rs)$")).ShouldBe(["test1.cs", "test2.rs"]);
     }
 
     [Test]
-    public async Task TypeD_OnlyReturnsDirectories()
+    public async Task GlobPattern_MatchesEntireFilename()
     {
-        CreateDir("dir1");
-        CreateFile("dir1/file.txt");
-
-        var (output, _) = await Run(_tempDir, "-type", "d");
-        output.ShouldContain("dir1/");
-        output.ShouldNotContain("file.txt");
-    }
-
-    // --- -ext filter ---
-
-    [Test]
-    public async Task ExtFilter_MatchesExtension()
-    {
-        CreateFile("code.cs");
-        CreateFile("notes.txt");
-        CreateFile("data.json");
-
-        var (output, _) = await Run(_tempDir, "-ext", ".cs");
-        output.ShouldContain("code.cs");
-        output.ShouldNotContain("notes.txt");
-        output.ShouldNotContain("data.json");
+        CreateFile("test.cs");
+        CreateFile("test.css");
+        CreateFile("nested/next.cs");
+        (await Search("*.cs", "-g")).ShouldBe(["nested/next.cs", "test.cs"]);
+        (await Search("test", "--glob")).ShouldBeEmpty();
     }
 
     [Test]
-    public async Task ExtFilter_WorksWithoutLeadingDot()
-    {
-        CreateFile("code.cs");
-        CreateFile("notes.txt");
-
-        var (output, _) = await Run(_tempDir, "-ext", "cs");
-        output.ShouldContain("code.cs");
-        output.ShouldNotContain("notes.txt");
-    }
-
-    [Test]
-    public async Task ExtFilter_IsCaseInsensitive()
-    {
-        CreateFile("readme.TXT");
-        CreateFile("code.cs");
-
-        var (output, _) = await Run(_tempDir, "-ext", ".txt");
-        output.ShouldContain("readme.TXT");
-        output.ShouldNotContain("code.cs");
-    }
-
-    // --- -name filter ---
-
-    [Test]
-    public async Task LongNameFilter_OnlyReturnsExactMatchesInSubdirectories()
-    {
-        CreateFile("dist/float-setup.exe");
-        CreateFile("dist/other.exe");
-        CreateFile("float-setup.exe.bak");
-
-        var (output, type) = await Run(_tempDir, "--name", "float-setup.exe");
-
-        type.ShouldBe(ResultType.OsCommand);
-        output.ShouldBe(Path.GetRelativePath(Environment.CurrentDirectory, Abs("dist/float-setup.exe")));
-    }
-
-    [Test]
-    [Arguments("-name")]
-    [Arguments("--name")]
-    [Arguments("-type")]
-    [Arguments("--type")]
-    [Arguments("-ext")]
-    [Arguments("--ext")]
-    [Arguments("--nmae")]
-    public async Task InvalidOrIncompleteOption_ReturnsError(string option)
-    {
-        CreateFile("unrelated.txt");
-        var (output, type) = await Run(_tempDir, option);
-        type.ShouldBe(ResultType.Error);
-        output.ShouldBe("");
-    }
-
-    [Test]
-    public async Task LongFilters_CanBeCombined()
-    {
-        CreateFile("dist/float-setup.exe");
-        CreateFile("dist/float-setup.txt");
-        CreateDir("other/float-setup.exe");
-
-        var (output, type) = await Run(_tempDir, "--name", "float-*", "--ext", "exe", "--type", "f");
-
-        type.ShouldBe(ResultType.OsCommand);
-        output.ShouldBe(Path.GetRelativePath(Environment.CurrentDirectory, Abs("dist/float-setup.exe")));
-    }
-
-    [Test]
-    public async Task NameFilter_ExactMatch()
-    {
-        CreateFile("target.cs");
-        CreateFile("other.cs");
-
-        var (output, _) = await Run(_tempDir, "-name", "target.cs");
-        output.ShouldContain("target.cs");
-        output.ShouldNotContain("other.cs");
-    }
-
-    [Test]
-    public async Task NameFilter_WildcardStar()
-    {
-        CreateFile("foo.cs");
-        CreateFile("bar.cs");
-        CreateFile("foo.txt");
-
-        var (output, _) = await Run(_tempDir, "-name", "*.cs");
-        output.ShouldContain("foo.cs");
-        output.ShouldContain("bar.cs");
-        output.ShouldNotContain("foo.txt");
-    }
-
-    [Test]
-    public async Task NameFilter_WildcardQuestion()
+    public async Task GlobPattern_SupportsQuestionAndCharacterClasses()
     {
         CreateFile("a1.txt");
         CreateFile("a2.txt");
         CreateFile("abc.txt");
-
-        var (output, _) = await Run(_tempDir, "-name", "a?.txt");
-        output.ShouldContain("a1.txt");
-        output.ShouldContain("a2.txt");
-        output.ShouldNotContain("abc.txt");
+        (await Search("a?.txt", "-g")).ShouldBe(["a1.txt", "a2.txt"]);
+        (await Search("a[12].txt", "-g")).ShouldBe(["a1.txt", "a2.txt"]);
     }
 
     [Test]
-    public async Task NameFilter_IsCaseInsensitive()
-    {
-        CreateFile("README.md");
-        CreateFile("other.md");
-
-        var (output, _) = await Run(_tempDir, "-name", "readme.md");
-        output.ShouldContain("README.md");
-    }
-
-    [Test]
-    public async Task NameFilter_DotInFilenameIsLiteral()
-    {
-        CreateFile("file.txt");
-        CreateFile("filextxt");
-
-        var (output, _) = await Run(_tempDir, "-name", "file.txt");
-        output.ShouldContain("file.txt");
-        // The dot in "file.txt" should NOT match arbitrary characters
-        output.ShouldNotContain("filextxt");
-    }
-
-    [Test]
-    public async Task NameFilter_StarDoesNotMatchPartialExtension()
+    public async Task GlobPattern_SupportsAlternativesAndEmptyPattern()
     {
         CreateFile("test.cs");
-        CreateFile("test.css");
-
-        var (output, _) = await Run(_tempDir, "-name", "*.cs");
-        output.ShouldContain("test.cs");
-        output.ShouldNotContain("test.css");
-    }
-
-    // --- Combined filters ---
-
-    [Test]
-    public async Task CombinedNameAndType()
-    {
-        CreateDir("src");
-        CreateFile("src/main.cs");
-        CreateFile("src/test.txt");
-
-        var (output, _) = await Run(_tempDir, "-name", "*.cs", "-type", "f");
-        output.ShouldContain("main.cs");
-        output.ShouldNotContain("test.txt");
+        CreateFile("test.rs");
+        CreateFile("test.txt");
+        (await Search("*.{cs,rs}", "-g")).ShouldBe(["test.cs", "test.rs"]);
+        (await Search("", "-g")).ShouldBe(["test.cs", "test.rs", "test.txt"]);
     }
 
     [Test]
-    public async Task CombinedExtAndType()
-    {
-        CreateDir("logs");
-        CreateFile("logs/app.log");
-
-        var (output, _) = await Run(_tempDir, "-ext", ".log", "-type", "f");
-        output.ShouldContain("app.log");
-    }
-
-    // --- Searching specific subdirectory ---
-
-    [Test]
-    public async Task SearchesSpecificSubdirectory()
-    {
-        CreateFile("a/file.txt");
-        CreateFile("b/file.txt");
-
-        var (output, _) = await Run(Abs("a"));
-        output.ShouldContain("file.txt");
-        // Should not include files from b/
-        output.ShouldNotContain(Path.Combine("b", "file.txt"));
-    }
-
-    // --- Edge cases ---
-
-    [Test]
-    public async Task NamePatternWithMultipleStars()
-    {
-        CreateFile("test_file_v2.cs");
-        CreateFile("test.cs");
-        CreateFile("other.txt");
-
-        var (output, _) = await Run(_tempDir, "-name", "*file*");
-        output.ShouldContain("test_file_v2.cs");
-        output.ShouldNotContain("other.txt");
-    }
-
-    [Test]
-    public async Task DeeplyNestedFiles()
-    {
-        CreateFile("a/b/c/d/e/deep.txt");
-
-        var (output, _) = await Run(_tempDir);
-        output.ShouldContain("deep.txt");
-    }
-
-    [Test]
-    public async Task NameWithSpecialRegexChars_TreatedAsLiteral()
+    public async Task FixedStrings_TreatsRegexCharactersLiterally()
     {
         CreateFile("file(1).txt");
-        CreateFile("other.txt");
-
-        var (output, _) = await Run(_tempDir, "-name", "file(1).txt");
-        output.ShouldContain("file(1).txt");
-        output.ShouldNotContain("other.txt");
+        CreateFile("file1.txt");
+        (await Search("file(1).txt", "-F")).ShouldBe(["file(1).txt"]);
     }
 
     [Test]
-    public async Task NameWithBracketsInPattern()
+    public async Task MatchesFilenameByDefault_AndFullPathOnRequest()
     {
-        CreateFile("data[0].json");
-        CreateFile("data.json");
-
-        var (output, _) = await Run(_tempDir, "-name", "data[0].json");
-        output.ShouldContain("data[0].json");
-    }
-
-    // --- Configured ignores and optional .gitignore ---
-
-    [Test]
-    [Arguments("Cargo.toml", "release")]
-    [Arguments("Cargo.toml", "target/release")]
-    [Arguments("App.csproj", "bin")]
-    [Arguments("App.csproj", "obj")]
-    [Arguments("App.sln", "src/App/obj")]
-    [Arguments("App.slnx", "src/App/bin")]
-    [Arguments("package.json", "node_modules")]
-    public async Task ProjectDefaults_SkipGeneratedFoldersAndAllowOverrides(string marker, string ignoredFolder)
-    {
-        CreateDir(".git");
-        CreateFile(marker);
-        CreateFile($"{ignoredFolder}/generated.txt");
-        CreateFile("dist/Float.Setup.exe");
-
-        var (output, type) = await Run(_tempDir);
-        type.ShouldBe(ResultType.OsCommand);
-        output.ShouldNotContain("generated.txt");
-        output.ShouldContain("Float.Setup.exe");
-
-        var (included, _) = await Run(_tempDir, "--include-ignored");
-        included.ShouldContain("generated.txt");
-
-        var (custom, _) = await RunWithIgnoreList(".git", _tempDir);
-        custom.ShouldContain("generated.txt");
+        CreateFile("needle/file.txt");
+        (await Search("needle", "-tf")).ShouldBeEmpty();
+        (await Search("needle", "-p", "-tf")).ShouldBe(["needle/file.txt"]);
     }
 
     [Test]
-    public async Task NoProjectMarkers_KeepOrdinaryFoldersSearchable()
+    public async Task TypeAndExtensionFilters_CombineAndRepeat()
     {
-        CreateDir(".git");
-        CreateFile("release/rust.txt");
-        CreateFile("bin/binary.txt");
-        CreateFile("obj/object.txt");
-        CreateFile("node_modules/module.txt");
-
-        var (output, _) = await Run(_tempDir);
-        output.ShouldContain("rust.txt");
-        output.ShouldContain("binary.txt");
-        output.ShouldContain("object.txt");
-        output.ShouldContain("module.txt");
+        CreateFile("src/main.CS");
+        CreateFile("src/lib.rs");
+        CreateFile("src/notes.txt");
+        Directory.CreateDirectory(Abs("folder.cs"));
+        (await Search("", "-tf", "-e", ".cs", "--extension=rs")).ShouldBe(["src/lib.rs", "src/main.CS"]);
+        (await Search("", "-e", "cs")).ShouldBe(["folder.cs", "src/main.CS"]);
+        (await Search("", "--type", "directory")).ShouldBe(["folder.cs", "src"]);
+        (await Search("", "-t", "d", "-t", "f")).Length.ShouldBe(5);
     }
 
     [Test]
-    public async Task NestedSearch_InheritsProjectMarkersFromAncestors()
+    public async Task HiddenEntriesAndSubtrees_AreSkippedByDefault()
     {
-        CreateFile("Cargo.toml");
-        CreateFile("target/release/generated.txt");
-        CreateFile("target/debug/visible.txt");
-
-        var (output, _) = await Run(Abs("target"));
-        output.ShouldNotContain("generated.txt");
-        output.ShouldContain("visible.txt");
-
-        var (ignoredRoot, _) = await Run(Abs("target/release"));
-        ignoredRoot.ShouldBe("No matches found.");
+        CreateFile("visible.txt");
+        CreateFile(".secret.txt");
+        CreateFile(".hidden/nested.txt");
+        (await Search()).ShouldBe(["visible.txt"]);
+        (await Search("", "-H")).ShouldBe([".hidden", ".hidden/nested.txt", ".secret.txt", "visible.txt"]);
     }
 
     [Test]
-    public async Task NestedProjects_ApplyRulesOnlyToTheirOwnSubtrees()
+    public async Task GitIgnore_FiltersFilesAndDirectoriesByDefault()
     {
-        CreateDir(".git");
-        CreateFile("backend/App.csproj");
-        CreateFile("backend/bin/dotnet-generated.txt");
-        CreateFile("frontend/package.json");
-        CreateFile("frontend/node_modules/node-generated.txt");
-        CreateFile("frontend/bin/node-script.txt");
-        CreateFile("native/Cargo.toml");
-        CreateFile("native/release/rust-generated.txt");
-        CreateFile("docs/release/release-notes.txt");
-
-        var (output, _) = await Run(_tempDir);
-        output.ShouldNotContain("dotnet-generated.txt");
-        output.ShouldNotContain("node-generated.txt");
-        output.ShouldNotContain("rust-generated.txt");
-        output.ShouldContain("node-script.txt");
-        output.ShouldContain("release-notes.txt");
-    }
-
-    [Test]
-    public async Task MixedProject_CombinesDetectedRules()
-    {
-        CreateFile("App.csproj");
-        CreateFile("package.json");
-        CreateFile("Cargo.toml");
-        CreateFile("obj/dotnet-generated.txt");
-        CreateFile("node_modules/node-generated.txt");
-        CreateFile("release/rust-generated.txt");
-        CreateFile("dist/Float.Setup.exe");
-
-        var (output, _) = await Run(_tempDir);
-        output.ShouldNotContain("generated.txt");
-        output.ShouldContain("Float.Setup.exe");
-    }
-
-    [Test]
-    public async Task NestedRepository_DoesNotInheritOuterProjectRules()
-    {
-        CreateFile("App.csproj");
-        CreateFile("nested/.git"); // Worktree-style repository marker.
-        CreateFile("nested/bin/visible.txt");
-
-        var (output, _) = await Run(Abs("nested"));
-        output.ShouldContain("visible.txt");
-    }
-
-    [Test]
-    public async Task Defaults_SkipNoiseButFindGitignoredBuildArtifacts()
-    {
-        CreateFile("package.json");
-        CreateFile(".git/config");
-        CreateFile("nested/node_modules/dependency.js");
-        CreateFile("dist/Float.Setup.exe");
-        File.WriteAllText(Abs(".gitignore"), "dist/\n");
-
-        var (output, _) = await Run(_tempDir);
-        output.ShouldContain(Path.Combine("dist", "Float.Setup.exe"));
-        output.ShouldNotContain("dependency.js");
-        output.ShouldNotContain("config");
-    }
-
-    [Test]
-    public async Task ConfiguredPatterns_ReplaceDefaultsAndOnlyExcludeDirectories()
-    {
-        CreateFile("nested/cache-data/hidden.txt");
-        CreateFile("obj/generated.dll");
-        CreateFile("node_modules/visible.js");
-        CreateFile("cache-file.txt");
-
-        var (output, _) = await RunWithIgnoreList(" cache*, obj, , ", _tempDir);
-        output.ShouldNotContain("hidden.txt");
-        output.ShouldNotContain("generated.dll");
-        output.ShouldContain("visible.js");
-        output.ShouldContain("cache-file.txt");
-    }
-
-    [Test]
-    [Arguments("")]
-    [Arguments(",")]
-    public async Task EmptyIgnoreList_DisablesDefaultExclusions(string ignoreList)
-    {
-        CreateFile("node_modules/visible.js");
-        var (output, _) = await RunWithIgnoreList(ignoreList, _tempDir);
-        output.ShouldContain("visible.js");
-    }
-
-    [Test]
-    [Arguments(true)]
-    [Arguments(false)]
-    public async Task IncludeIgnored_OverridesConfigAndGitIgnoreInEitherOrder(bool includeFirst)
-    {
-        CreateDir(".git");
-        CreateFile("cache/cached.txt");
-        CreateFile("dist/Float.Setup.exe");
-        File.WriteAllText(Abs(".gitignore"), "dist/\n");
-
-        var (output, _) = await RunWithIgnoreList("cache", _tempDir,
-            includeFirst ? "--include-ignored" : "--gitignore",
-            includeFirst ? "--gitignore" : "--include-ignored");
-        output.ShouldContain("cached.txt");
-        output.ShouldContain("Float.Setup.exe");
-    }
-
-    [Test]
-    public async Task IncludeIgnored_SearchesIgnoredDirectories()
-    {
-        CreateDir(".git");
-        CreateDir("bin");
+        Directory.CreateDirectory(Abs(".git"));
+        CreateFile(".gitignore", "bin/\n*.log\n");
         CreateFile("bin/generated.dll");
-        CreateFile("bin/unrelated.txt");
-        File.WriteAllText(Path.Combine(_tempDir, ".gitignore"), "bin/\n");
-
-        var (output, _) = await Run(_tempDir, "--include-ignored", "--name", "*.dll");
-        output.ShouldContain("generated.dll");
-        output.ShouldNotContain("unrelated.txt");
-    }
-
-    [Test]
-    [Arguments("-i")]
-    [Arguments("--gitignore")]
-    public async Task GitIgnore_SkipsIgnoredDirectories(string option)
-    {
-        Directory.CreateDirectory(Path.Combine(_tempDir, ".git"));
-        CreateDir("bin");
-        CreateFile("bin/generated.dll");
+        CreateFile("app.log");
         CreateFile("src/main.cs");
-        File.WriteAllText(Path.Combine(_tempDir, ".gitignore"), "bin/\n");
-
-        CreateFile(".git/config");
-
-        var (output, _) = await Run(_tempDir, option);
-        output.ShouldNotContain("generated.dll");
-        output.ShouldNotContain(".git/");
-        output.ShouldNotContain("config");
-        output.ShouldContain("main.cs");
+        (await Search()).ShouldBe(["src", "src/main.cs"]);
+        (await Search("", "-I")).ShouldBe(["app.log", "bin", "bin/generated.dll", "src", "src/main.cs"]);
+        (await Search("", "-HI")).ShouldContain(".gitignore");
+        (await Search("", "-u")).ShouldContain("bin/generated.dll");
     }
 
     [Test]
-    public async Task GitIgnore_DetectsRepositoryFromNestedSearchPath()
+    public async Task HiddenFlag_StillRespectsIgnoreRules()
     {
-        Directory.CreateDirectory(Path.Combine(_tempDir, ".git"));
-        CreateDir("bin");
-        CreateFile("bin/generated.dll");
-        File.WriteAllText(Path.Combine(_tempDir, ".gitignore"), "bin/\n");
-
-        var (output, _) = await Run(Path.Combine(_tempDir, "bin"), "--gitignore");
-        output.ShouldBe("No matches found.");
+        Directory.CreateDirectory(Abs(".git"));
+        CreateFile(".gitignore", "*.log\n");
+        CreateFile(".secret.log");
+        CreateFile(".secret.txt");
+        (await Search("secret", "-H")).ShouldBe([".secret.txt"]);
     }
 
     [Test]
-    public async Task IncludeIgnored_SearchesExplicitIgnoredRoot()
+    public async Task GitIgnore_RequiresARepository()
     {
-        CreateDir(".git");
-        CreateFile("bin/generated.dll");
-        File.WriteAllText(Path.Combine(_tempDir, ".gitignore"), "bin/\n");
+        CreateFile(".gitignore", "*.log\n");
+        CreateFile("app.log");
+        (await Search()).ShouldBe(["app.log"]);
+    }
 
-        var (output, _) = await Run(Abs("bin"), "--include-ignored");
-        output.ShouldContain("generated.dll");
+    [Test]
+    public async Task IgnoreFiles_WorkOutsideGitRepositories()
+    {
+        CreateFile(".ignore", "*.log\n");
+        CreateFile(".fdignore", "cache/\n");
+        CreateFile("app.log");
+        CreateFile("cache/blob");
+        CreateFile("main.cs");
+        (await Search()).ShouldBe(["main.cs"]);
+    }
+
+    [Test]
+    public async Task NestedIgnoreRulesAndNegations_AreRespected()
+    {
+        Directory.CreateDirectory(Abs(".git"));
+        CreateFile(".gitignore", "*.log\n!keep.log\n/root-only.txt\n");
+        CreateFile("drop.log");
+        CreateFile("keep.log");
+        CreateFile("root-only.txt");
+        CreateFile("sub/.gitignore", "!nested.log\nlocal.txt\n");
+        CreateFile("sub/nested.log");
+        CreateFile("sub/drop.log");
+        CreateFile("sub/local.txt");
+        CreateFile("sub/root-only.txt");
+        (await Search()).ShouldBe(["keep.log", "sub", "sub/nested.log", "sub/root-only.txt"]);
+        var result = await Execute(["", Abs("sub")]);
+        result.Output!.ShouldContain("nested.log");
+        result.Output!.ShouldNotContain("drop.log");
+    }
+
+    [Test]
+    public async Task DirectoryOnlyIgnore_DoesNotHideFilesWithSameName()
+    {
+        CreateFile(".ignore", "cache/\n");
+        CreateFile("cache");
+        CreateFile("sub/cache/generated.txt");
+        (await Search()).ShouldBe(["cache", "sub"]);
+    }
+
+    [Test]
+    public async Task GenericIgnore_TakesPrecedenceOverNestedGitNegation()
+    {
+        Directory.CreateDirectory(Abs(".git"));
+        CreateFile(".ignore", "*.log\n");
+        CreateFile("sub/.gitignore", "!keep.log\n");
+        CreateFile("sub/keep.log");
+        (await Search("", "-tf")).ShouldBeEmpty();
+    }
+
+    [Test]
+    public async Task GitRepositoryExclude_IsRespected()
+    {
+        CreateFile(".git/info/exclude", "local.txt\n");
+        CreateFile("local.txt");
+        CreateFile("visible.txt");
+        (await Search()).ShouldBe(["visible.txt"]);
+    }
+
+    [Test]
+    public async Task Excludes_PruneDirectoriesAndMatchFiles()
+    {
+        CreateFile("cache/deep.txt");
+        CreateFile("src/keep.cs");
+        CreateFile("src/backup.bak");
+        (await Search("", "-E", "cache", "--exclude", "*.bak", "-I")).ShouldBe(["src", "src/keep.cs"]);
+    }
+
+    [Test]
+    public async Task MaxDepth_LimitsTraversal()
+    {
+        CreateFile("top.txt");
+        CreateFile("sub/deep.txt");
+        (await Search("", "-d1")).ShouldBe(["sub", "top.txt"]);
+        (await Search("", "--max-depth=0")).ShouldBeEmpty();
+    }
+
+    [Test]
+    public async Task MultipleRoots_AreSearched()
+    {
+        CreateFile("a/target.cs");
+        CreateFile("b/target.rs");
+        CreateFile("c/target.txt");
+        var result = await Execute(["target", Abs("a"), Abs("b")]);
+        result.Type.ShouldBe(ResultType.OsCommand);
+        result.Output!.ShouldContain("target.cs");
+        result.Output!.ShouldContain("target.rs");
+        result.Output!.ShouldNotContain("target.txt");
+    }
+
+    [Test]
+    public async Task DashPattern_CanFollowEndOfOptions()
+    {
+        CreateFile("-target.txt");
+        CreateFile("other.txt");
+        var result = await Execute(["--", "-target", _tempDir]);
+        result.Output!.ShouldBe(Abs("-target.txt"));
+    }
+
+    [Test]
+    public async Task AbsolutePathFlag_AndAbsoluteRoot_ProduceAbsolutePaths()
+    {
+        CreateFile("file.txt");
+        (await Shell("find file -a")).ShouldBe(Abs("file.txt"));
+        var result = await Execute(["file", _tempDir]);
+        result.Output!.ShouldBe(Abs("file.txt"));
+    }
+
+    [Test]
+    public async Task DoesNotTruncateAtOneThousandResults()
+    {
+        for (var i = 0; i < 1005; i++) CreateFile($"file{i}.txt");
+        (await Search("", "-tf")).Length.ShouldBe(1005);
+    }
+
+    [Test]
+    public async Task SymlinkDirectories_AreListedWithoutFollowingCycles()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        CreateFile("real/file.txt");
+        Directory.CreateSymbolicLink(Abs("real/loop"), _tempDir);
+        File.CreateSymbolicLink(Abs("alias.txt"), Abs("real/file.txt"));
+        (await Search("", "-tl")).ShouldBe(["alias.txt", "real/loop"]);
+        (await Search("", "-tf")).ShouldBe(["real/file.txt"]);
+    }
+
+    [Test]
+    [Arguments("-e")]
+    [Arguments("-t")]
+    [Arguments("-d")]
+    [Arguments("-E")]
+    [Arguments("--unknown")]
+    [Arguments("--type=invalid")]
+    [Arguments("--max-depth=-1")]
+    [Arguments("--hidden=yes")]
+    [Arguments("--extension=")]
+    public async Task InvalidOptions_ReturnErrors(string option)
+    {
+        var result = await Execute(["", _tempDir, option]);
+        result.Type.ShouldBe(ResultType.Error);
+        result.Error.ShouldNotBeNull();
+    }
+
+    [Test]
+    public async Task InvalidRegex_ReturnsError()
+    {
+        var result = await Execute(["[", _tempDir]);
+        result.Type.ShouldBe(ResultType.Error);
+    }
+
+    [Test]
+    public async Task NonexistentRoot_ReturnsError()
+    {
+        var result = await Execute(["", Abs("missing")]);
+        result.Type.ShouldBe(ResultType.Error);
+        result.Error!.Message.ShouldContain("No such directory");
+    }
+
+    [Test]
+    public async Task Help_DescribesNewSyntax()
+    {
+        var result = await Execute(["--help"]);
+        result.Type.ShouldBe(ResultType.OsCommand);
+        result.Output!.ShouldContain("[pattern] [path...]");
+        result.Output!.ShouldContain("--hidden");
+    }
+
+    [Test]
+    public async Task QuotedGlobAndRegex_WorkThroughShellPipelines()
+    {
+        CreateFile("src/one.cs");
+        CreateFile("src/two.cs");
+        CreateFile("root.cs");
+        CreateFile("src/other.txt");
+        (await Shell("find -g '*.cs' . | wc -l")).ShouldBe("3");
+        (await Shell("find 'one|two' src -tf | wc -l")).ShouldBe("2");
     }
 }

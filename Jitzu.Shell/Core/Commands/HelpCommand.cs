@@ -39,14 +39,12 @@ Built-in Commands:
   wc [-l/-w/-c] f - Count lines/words/chars in files
   sort [-r/-n/-u]  - Sort lines in a file
   uniq [-c/-d] f   - Remove consecutive duplicate lines
-  find path [opts] - Recursive file search
-                   defaults: .git; Rust: release; .NET: bin,obj; Node: node_modules
-                   JITZU_FIND_IGNORE replaces project-aware defaults
-                   --include-ignored  search all folders
-                   -i, --gitignore  skip directories ignored by .gitignore
-                   -name pattern  filename pattern
-                   -type f|d      files or directories
-                   -ext .cs       filter by extension
+  find [pattern] [path...] - Recursive filename search (fd-style)
+                   regex and smart case; skips hidden and ignored entries
+                   -g glob, -F literal, -i ignore case, -s case sensitive
+                   -H hidden, -I no ignore, -u include everything
+                   -t f|d|l type, -e cs extension, -d depth, -E exclude
+                   -p full path, -a absolute paths; find --help for details
   diff f1 f2      - Compare two files
   time <cmd>      - Measure command execution time
   watch [-n s] cmd - Repeat command every N seconds

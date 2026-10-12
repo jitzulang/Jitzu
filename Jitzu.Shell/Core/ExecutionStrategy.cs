@@ -79,9 +79,9 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
         string[] args;
         try
         {
-            args = isExec ? ExecCommand.SplitArguments(command) : CommandLineParser.SplitCommandLine(command).ToArray();
+            args = isExec ? ExecCommand.SplitArguments(command) : SplitCommandArguments(command);
         }
-        catch (ArgumentException ex) when (isExec)
+        catch (ArgumentException ex)
         {
             return new ShellResult(ResultType.Error, "", ex) { Status = 2 };
         }
@@ -114,7 +114,7 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
         }
 
         // 1. Check if it's a builtin command first
-        var hasPipe = command.Contains('|');
+        var hasPipe = FindTopLevelPipes(command).Count > 0;
         if (!hasPipe && builtins.IsBuiltin(args[0]))
             return await builtins.ExecuteAsync(args[0], args[1..].AsMemory());
 
@@ -338,7 +338,7 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
             }
 
             // For output redirection, we need to capture output
-            var args = CommandLineParser.SplitCommandLine(command).ToArray();
+            var args = SplitCommandArguments(command);
             args = ExpandGlobs(args);
 
             ShellResult result;
@@ -421,11 +421,25 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
     }
 
     /// <summary>
-    /// Expands glob patterns (*, ?, **) in command arguments.
+    /// Uses shell quoting for find's patterns and search paths.
     /// </summary>
+    private static string[] SplitCommandArguments(string command)
+    {
+        var trimmed = command.AsSpan().TrimStart();
+        var isFind = trimmed.StartsWith("find") && (trimmed.Length == 4 || char.IsWhiteSpace(trimmed[4]));
+        return isFind ? ExecCommand.SplitArguments(command, "find")
+            : CommandLineParser.SplitCommandLine(command).ToArray();
+    }
+
+    /// <summary>Expands glob patterns (*, ?, **) in command arguments.</summary>
     private static string[] ExpandGlobs(string[] args)
     {
         if (args.Length == 0) return args;
+
+        // find interprets its own regex/glob patterns and exclusion patterns.
+        // SplitCommandLine has already removed quotes, so expanding here would
+        // turn even a quoted pattern into positional filenames.
+        if (args[0] == "find") return args;
 
         var expanded = new List<string> { args[0] }; // Don't expand the command itself
 
@@ -1055,7 +1069,7 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
     private async Task<string> CaptureCommandOutputAsync(string command)
     {
         var trimmed = command.Trim();
-        var cmdArgs = CommandLineParser.SplitCommandLine(trimmed).ToArray();
+        var cmdArgs = SplitCommandArguments(trimmed);
 
         // Check if it's a shell builtin (like Windows 'ls')
         if (builtins.IsBuiltin(cmdArgs[0]))
@@ -1266,7 +1280,7 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
             if (!s.StartsWith('-'))
                 return s;
         }
-        return "";
+        throw new ArgumentException("grep requires a pattern. Usage: command | grep [-i] \"pattern\" (or grep(\"pattern\"))");
     }
 
     /// <summary>
@@ -1317,12 +1331,12 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
     private async Task<ShellResult> ExecuteBuiltinPipelineAsync(string builtinCmd, string rightSide)
     {
         // Execute the builtin and capture its output
-        var builtinArgs = CommandLineParser.SplitCommandLine(builtinCmd).ToArray();
+        var builtinArgs = SplitCommandArguments(builtinCmd);
         builtinArgs = ExpandGlobs(builtinArgs);
         var builtinResult = await builtins.ExecuteAsync(builtinArgs[0], builtinArgs[1..].AsMemory());
 
         var output = Markup.Remove(builtinResult.Output ?? "");
-        if (string.IsNullOrEmpty(output))
+        if (builtinResult.Error != null)
             return builtinResult;
 
         // Check if the right side is a Jitzu pipe function chain
@@ -1342,7 +1356,7 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
             return await builtins.ExecuteAsync("tee", teeArgs.AsMemory());
         }
 
-        var rightSegments = rightSide.Split('|').Select(s => s.Trim()).ToArray();
+        var rightSegments = SplitJitzuSegments(rightSide, [], 0);
         var firstFunc = ExtractLeadingIdentifier(rightSegments[0]);
         if (firstFunc != null && PipeFunctions.Contains(firstFunc))
         {
@@ -1373,6 +1387,10 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
 
                 var result = await StreamingPipeline.MaterializeAsync(stream, cts.Token);
                 return new ShellResult(ResultType.Jitzu, result, null);
+            }
+            catch (Exception ex)
+            {
+                return new ShellResult(ResultType.Error, "", new Exception($"Pipe execution failed: {ex.Message}", ex));
             }
             finally
             {
@@ -1511,7 +1529,7 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var trimmed = command.Trim();
-        var cmdArgs = CommandLineParser.SplitCommandLine(trimmed).ToArray();
+        var cmdArgs = SplitCommandArguments(trimmed);
 
         // Check if it's a shell builtin
         if (builtins.IsBuiltin(cmdArgs[0]))

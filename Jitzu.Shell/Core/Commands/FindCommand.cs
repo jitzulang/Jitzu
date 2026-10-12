@@ -1,142 +1,74 @@
-using System.IO.Enumeration;
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Jitzu.Shell.Core.Commands;
 
-/// <summary>
-/// Recursively searches for files and directories, skipping ignored folders by default.
-/// </summary>
-public class FindCommand : CommandBase
+/// <summary>Recursively searches filenames with fd-style syntax and defaults.</summary>
+public class FindCommand(CommandContext context) : CommandBase(context)
 {
-    private readonly Func<string?> _getIgnoreList;
-
-    public FindCommand(CommandContext context)
-        : this(context, () => Environment.GetEnvironmentVariable("JITZU_FIND_IGNORE")) { }
-
-    internal FindCommand(CommandContext context, Func<string?> getIgnoreList) : base(context)
-    {
-        _getIgnoreList = getIgnoreList;
-    }
+    private const string Help = """
+        Usage: find [options] [pattern] [path...]
+        Search recursively by filename (regular expression, smart case).
+        Hidden files and ignored entries are skipped by default.
+          -g, --glob              Match a glob instead of a regular expression
+          -F, --fixed-strings     Treat the pattern as literal text
+          -i, --ignore-case       Case-insensitive matching
+          -s, --case-sensitive    Case-sensitive matching
+          -H, --hidden            Include hidden files and directories
+          -I, --no-ignore         Include ignored files and directories
+          -u, --unrestricted      Include both hidden and ignored entries
+          -t, --type f|d|l        Filter files, directories, or symbolic links (repeatable)
+          -e, --extension ext     Filter file extensions (repeatable)
+          -p, --full-path         Match the full absolute path
+          -a, --absolute-path     Print absolute paths
+          -d, --max-depth depth   Limit traversal depth
+          -E, --exclude glob      Exclude matching entries (repeatable)
+          -h, --help              Show this help
+        Examples: find readme; find -e cs . src; find -g '*.json'; find -HI
+        """;
 
     public override Task<ShellResult> ExecuteAsync(ReadOnlyMemory<string> args)
     {
-        if (args.Length == 0)
-            return Task.FromResult(new ShellResult(ResultType.Error, "",
-                new Exception("Usage: find <path> [-name|--name pattern] [-type|--type f|d] [-ext|--ext .cs] [-i|--gitignore] [--include-ignored]")));
-
         try
         {
-            string? searchPath = null;
-            string? namePattern = null;
-            string? extension = null;
-            char? typeFilter = null; // 'f' for file, 'd' for directory
-            var useGitIgnore = false;
-            var includeIgnored = false;
+            var options = ParseArgs(args.ToArray());
+            if (options.Help)
+                return Task.FromResult(new ShellResult(ResultType.OsCommand, Help, null));
 
-            for (var i = 0; i < args.Length; i++)
+            var ignoreCase = options.IgnoreCase ?? !options.Pattern.Any(char.IsUpper);
+            var expression = options.Pattern.Length == 0 ? "" : options.Glob ? GlobToRegex(options.Pattern, anchored: true)
+                : options.FixedStrings ? Regex.Escape(options.Pattern) : options.Pattern;
+            var matcher = new Regex(expression, RegexOptions.CultureInvariant |
+                (ignoreCase ? RegexOptions.IgnoreCase : RegexOptions.None), TimeSpan.FromSeconds(1));
+            var excludes = options.Excludes.Select(pattern => IgnoreRule.Create("", pattern)).ToArray();
+            var roots = options.Paths.Select(searchPath => (Input: searchPath, Full: ExpandPath(searchPath))).ToArray();
+            foreach (var root in roots)
+                if (!Directory.Exists(root.Full))
+                    throw new DirectoryNotFoundException($"No such directory: {root.Input}");
+
+            var output = new StringBuilder();
+            foreach (var root in roots)
             {
-                var arg = args.Span[i];
-                switch (arg)
+                foreach (var entry in EnumerateEntries(root.Full, options, excludes))
                 {
-                    case "--include-ignored":
-                        includeIgnored = true;
-                        break;
-                    case "-i":
-                    case "--gitignore":
-                        useGitIgnore = true;
-                        break;
-                    case "-name":
-                    case "--name":
-                        if (i + 1 >= args.Length)
-                            throw new ArgumentException($"Missing value for {arg}.");
-                        namePattern = args.Span[++i];
-                        break;
-                    case "-type":
-                    case "--type":
-                        if (i + 1 >= args.Length)
-                            throw new ArgumentException($"Missing value for {arg}.");
-                        var type = args.Span[++i];
-                        if (type is not ("f" or "d"))
-                            throw new ArgumentException($"Invalid value for {arg}: {type}. Expected f or d.");
-                        typeFilter = type[0];
-                        break;
-                    case "-ext":
-                    case "--ext":
-                        if (i + 1 >= args.Length)
-                            throw new ArgumentException($"Missing value for {arg}.");
-                        extension = args.Span[++i];
-                        if (!extension.StartsWith('.')) extension = "." + extension;
-                        break;
-                    default:
-                        if (arg.StartsWith('-'))
-                            throw new ArgumentException($"Unknown option: {arg}.");
-                        if (searchPath is not null)
-                            throw new ArgumentException($"Unexpected argument: {arg}.");
-                        searchPath = arg;
-                        break;
+                    var isLink = entry.Attributes.HasFlag(FileAttributes.ReparsePoint);
+                    var isDirectory = entry.Attributes.HasFlag(FileAttributes.Directory);
+                    var type = isLink ? 'l' : isDirectory ? 'd' : 'f';
+                    if (options.Types.Count > 0 && !options.Types.Contains(type)) continue;
+                    if (options.Extensions.Count > 0 && !options.Extensions.Any(ext =>
+                            entry.Name.EndsWith("." + ext, StringComparison.OrdinalIgnoreCase))) continue;
+                    if (!matcher.IsMatch(options.FullPath ? Normalize(entry.FullName) : entry.Name)) continue;
+
+                    var display = options.AbsolutePath || Path.IsPathRooted(root.Input)
+                        ? entry.FullName : Path.GetRelativePath(Environment.CurrentDirectory, entry.FullName);
+                    output.Append(display);
+                    if (isDirectory && !isLink) output.Append(Path.DirectorySeparatorChar);
+                    output.AppendLine();
                 }
             }
 
-            searchPath ??= ".";
-            var fullPath = ExpandPath(searchPath);
-
-            if (!Directory.Exists(fullPath))
-                return Task.FromResult(new ShellResult(ResultType.Error, "",
-                    new Exception($"No such directory: {searchPath}")));
-
-            var sb = new StringBuilder();
-            var dirColor = Theme["ls.directory"];
-            var reset = ThemeConfig.Reset;
-            var count = 0;
-            var ignoreMatcher = useGitIgnore && !includeIgnored ? GitIgnoreMatcher.TryCreate(fullPath) : null;
-            var configuredIgnores = includeIgnored ? null : _getIgnoreList();
-            var ignoredFolders = configuredIgnores?
-                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries) ?? [];
-            var projectIgnores = !includeIgnored && configuredIgnores is null
-                ? new ProjectDirectoryIgnoreMatcher()
-                : null;
-
-            bool IsIgnoredDirectory(string path) =>
-                ignoredFolders.Any(pattern => MatchGlob(Path.GetFileName(Path.TrimEndingDirectorySeparator(path)), pattern)) ||
-                projectIgnores?.IsIgnoredDirectory(path) == true ||
-                ignoreMatcher?.IsIgnoredDirectory(path) == true;
-
-            foreach (var entry in EnumerateEntries(fullPath, IsIgnoredDirectory))
-            {
-                var isDir = Directory.Exists(entry);
-                var name = Path.GetFileName(entry);
-
-                // Type filter
-                if (typeFilter == 'f' && isDir) continue;
-                if (typeFilter == 'd' && !isDir) continue;
-
-                // Name pattern (supports * and ?)
-                if (namePattern != null && !MatchGlob(name, namePattern))
-                    continue;
-
-                // Extension filter
-                if (extension != null && !name.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                var relative = Path.GetRelativePath(Environment.CurrentDirectory, entry);
-                if (isDir)
-                    sb.AppendLine($"{dirColor}{relative}/{reset}");
-                else
-                    sb.AppendLine(relative);
-
-                count++;
-                if (count >= 1000)
-                {
-                    sb.AppendLine($"{ThemeConfig.Dim}... truncated at 1000 results{reset}");
-                    break;
-                }
-            }
-
-            if (count == 0)
-                return Task.FromResult(new ShellResult(ResultType.OsCommand, "No matches found.", null));
-
-            return Task.FromResult(new ShellResult(ResultType.OsCommand, sb.ToString().TrimEnd(), null));
+            return Task.FromResult(new ShellResult(ResultType.OsCommand, output.ToString().TrimEnd('\r', '\n'), null));
         }
         catch (Exception ex)
         {
@@ -144,190 +76,245 @@ public class FindCommand : CommandBase
         }
     }
 
-    /// <summary>
-    /// Matches a filename against a glob pattern (supports * and ?).
-    /// Uses the built-in FileSystemName.MatchesSimpleExpression for correct glob semantics.
-    /// </summary>
-    private static bool MatchGlob(string name, string pattern) =>
-        FileSystemName.MatchesSimpleExpression(pattern, name, ignoreCase: true);
-
-    private static IEnumerable<string> EnumerateEntries(string root, Func<string, bool> isIgnoredDirectory)
+    private static Options ParseArgs(string[] args)
     {
-        var pending = new Stack<string>();
-        if (isIgnoredDirectory(root))
-            yield break;
-        pending.Push(root);
-
-        while (pending.Count > 0)
+        var options = new Options();
+        var positional = new List<string>();
+        var endOptions = false;
+        for (var i = 0; i < args.Length; i++)
         {
-            var directory = pending.Pop();
-            IEnumerable<string> entries;
-            try
+            var arg = args[i];
+            if (endOptions || !arg.StartsWith('-') || arg == "-")
             {
-                entries = Directory.EnumerateFileSystemEntries(directory);
-            }
-            catch (UnauthorizedAccessException)
-            {
+                positional.Add(arg);
                 continue;
             }
+            if (arg == "--") { endOptions = true; continue; }
+
+            if (arg.StartsWith("--"))
+            {
+                var split = arg.IndexOf('=');
+                var name = split < 0 ? arg : arg[..split];
+                var value = split < 0 ? null : arg[(split + 1)..];
+                var flag = name switch
+                {
+                    "--glob" => 'g', "--fixed-strings" => 'F', "--ignore-case" => 'i',
+                    "--case-sensitive" => 's', "--hidden" => 'H', "--no-ignore" => 'I',
+                    "--unrestricted" => 'u', "--type" => 't', "--extension" => 'e',
+                    "--full-path" => 'p', "--absolute-path" => 'a', "--max-depth" => 'd',
+                    "--exclude" => 'E', "--help" => 'h',
+                    _ => throw new ArgumentException($"Unknown option: {name}. See find --help.")
+                };
+                if (TakesValue(flag)) value ??= NextValue(args, ref i, name);
+                else if (value is not null) throw new ArgumentException($"Option {name} does not take a value.");
+                ApplyOption(options, flag, value);
+            }
+            else
+            {
+                for (var j = 1; j < arg.Length; j++)
+                {
+                    var flag = arg[j];
+                    string? value = null;
+                    if (TakesValue(flag))
+                    {
+                        value = j + 1 < arg.Length ? arg[(j + 1)..] : NextValue(args, ref i, $"-{flag}");
+                        j = arg.Length;
+                    }
+                    ApplyOption(options, flag, value);
+                }
+            }
+        }
+        options.Pattern = positional.FirstOrDefault() ?? "";
+        options.Paths.AddRange(positional.Skip(1));
+        if (options.Paths.Count == 0) options.Paths.Add(".");
+        return options;
+    }
+
+    private static bool TakesValue(char flag) => flag is 't' or 'e' or 'd' or 'E';
+
+    private static string NextValue(string[] args, ref int i, string name)
+    {
+        if (++i >= args.Length || args[i].StartsWith('-'))
+            throw new ArgumentException($"Option {name} requires a value.");
+        return args[i];
+    }
+
+    private static void ApplyOption(Options options, char flag, string? value)
+    {
+        switch (flag)
+        {
+            case 'g': options.Glob = true; options.FixedStrings = false; break;
+            case 'F': options.FixedStrings = true; options.Glob = false; break;
+            case 'i': options.IgnoreCase = true; break;
+            case 's': options.IgnoreCase = false; break;
+            case 'H': options.Hidden = true; break;
+            case 'I': options.NoIgnore = true; break;
+            case 'u': options.Hidden = true; options.NoIgnore = true; break;
+            case 'p': options.FullPath = true; break;
+            case 'a': options.AbsolutePath = true; break;
+            case 'h': options.Help = true; break;
+            case 't':
+                options.Types.Add(value switch
+                {
+                    "f" or "file" => 'f', "d" or "dir" or "directory" => 'd', "l" or "symlink" => 'l',
+                    _ => throw new ArgumentException($"Unsupported file type: {value}. Use f, d, or l.")
+                });
+                break;
+            case 'e':
+                var ext = value!.TrimStart('.');
+                if (ext.Length == 0) throw new ArgumentException("Extension cannot be empty.");
+                options.Extensions.Add(ext);
+                break;
+            case 'd':
+                if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var depth))
+                    throw new ArgumentException("Maximum depth must be a non-negative integer.");
+                options.MaxDepth = depth;
+                break;
+            case 'E': options.Excludes.Add(value!); break;
+            default: throw new ArgumentException($"Unknown option: -{flag}. See find --help.");
+        }
+    }
+
+    private static IEnumerable<FileSystemInfo> EnumerateEntries(string root, Options options, IgnoreRule[] excludes)
+    {
+        var rules = new List<IgnoreRule>();
+        var ancestors = new Stack<string>();
+        for (var parent = Directory.GetParent(root); parent is not null; parent = parent.Parent)
+            ancestors.Push(parent.FullName);
+        var inRepository = false;
+        if (!options.NoIgnore)
+            foreach (var ancestor in ancestors)
+            {
+                inRepository |= IsRepository(ancestor);
+                LoadRules(ancestor, inRepository, rules);
+            }
+
+        var pending = new Stack<(string Path, int Depth, List<IgnoreRule> Rules, bool InRepository)>();
+        pending.Push((root, 0, rules, inRepository));
+        while (pending.TryPop(out var directory))
+        {
+            if (directory.Depth >= options.MaxDepth) continue;
+            var currentRules = new List<IgnoreRule>(directory.Rules);
+            var repository = directory.InRepository || IsRepository(directory.Path);
+            if (!options.NoIgnore) LoadRules(directory.Path, repository, currentRules);
+            // fd-specific and generic ignore files take precedence over Git rules,
+            // even when a Git rule comes from a more deeply nested directory.
+            currentRules = currentRules.OrderBy(rule => rule.Priority).ToList();
+
+            FileSystemInfo[] entries;
+            try { entries = new DirectoryInfo(directory.Path).GetFileSystemInfos(); }
+            catch (UnauthorizedAccessException) { continue; }
+            catch (IOException) { continue; }
 
             foreach (var entry in entries)
             {
-                var isDirectory = Directory.Exists(entry);
-                if (isDirectory && isIgnoredDirectory(entry))
+                var isDirectory = entry.Attributes.HasFlag(FileAttributes.Directory);
+                if (!options.Hidden && (entry.Name.StartsWith('.') || entry.Attributes.HasFlag(FileAttributes.Hidden)))
                     continue;
+                if (excludes.Any(rule => rule.Matches(Normalize(Path.GetRelativePath(root, entry.FullName)), isDirectory)))
+                    continue;
+                var ignored = false;
+                foreach (var rule in currentRules)
+                    if (rule.Matches(Normalize(Path.GetRelativePath(rule.Root, entry.FullName)), isDirectory))
+                        ignored = !rule.Negated;
+                if (ignored) continue;
 
                 yield return entry;
-                if (isDirectory)
-                    pending.Push(entry);
+                // Directory links can point outside the root or form cycles; do not follow them.
+                if (isDirectory && !entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                    pending.Push((entry.FullName, directory.Depth + 1, currentRules, repository));
             }
         }
     }
 
-    private sealed class ProjectDirectoryIgnoreMatcher
+    private static bool IsRepository(string path) =>
+        Directory.Exists(Path.Combine(path, ".git")) || File.Exists(Path.Combine(path, ".git"));
+
+    private static void LoadRules(string directory, bool inRepository, List<IgnoreRule> rules)
     {
-        [Flags]
-        private enum ProjectKind { None = 0, Rust = 1, DotNet = 2, Node = 4 }
-
-        private readonly Dictionary<string, ProjectKind> _contexts = new(
-            OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-
-        public bool IsIgnoredDirectory(string path)
+        foreach (var (name, priority) in new[] { (".git/info/exclude", 0), (".gitignore", 1), (".ignore", 2), (".fdignore", 3) })
         {
-            path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
-            var name = Path.GetFileName(path);
-            if (name.Equals(".git", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            // Only inspect project markers when this folder could be excluded.
-            var kind = name.ToLowerInvariant() switch
-            {
-                "release" => ProjectKind.Rust,
-                "bin" or "obj" => ProjectKind.DotNet,
-                "node_modules" => ProjectKind.Node,
-                _ => ProjectKind.None
-            };
-            return kind != ProjectKind.None && (GetContext(Path.GetDirectoryName(path)) & kind) != 0;
-        }
-
-        private ProjectKind GetContext(string? directory)
-        {
-            if (directory is null)
-                return ProjectKind.None;
-            if (_contexts.TryGetValue(directory, out var cached))
-                return cached;
-
-            // Inherit within a project, but do not import rules from outside a repository.
-            var gitPath = Path.Combine(directory, ".git");
-            var context = Directory.Exists(gitPath) || File.Exists(gitPath)
-                ? ProjectKind.None
-                : GetContext(Path.GetDirectoryName(directory));
-
-            if (File.Exists(Path.Combine(directory, "Cargo.toml")))
-                context |= ProjectKind.Rust;
-            if (File.Exists(Path.Combine(directory, "package.json")))
-                context |= ProjectKind.Node;
+            if (name == ".gitignore" && !inRepository) continue;
             try
             {
-                if (Directory.EnumerateFiles(directory).Any(file =>
-                        Path.GetExtension(file).ToLowerInvariant() is ".csproj" or ".fsproj" or ".vbproj" or ".sln" or ".slnx"))
-                    context |= ProjectKind.DotNet;
+                var file = Path.Combine(directory, name);
+                if (!File.Exists(file)) continue;
+                foreach (var line in File.ReadLines(file))
+                {
+                    var pattern = line.TrimEnd();
+                    if (pattern.Length == 0 || pattern.StartsWith('#')) continue;
+                    rules.Add(IgnoreRule.Create(directory, pattern, priority));
+                }
             }
-            catch (UnauthorizedAccessException)
-            {
-                // An unreadable ancestor should not prevent searching an accessible child.
-            }
-
-            _contexts[directory] = context;
-            return context;
+            catch (UnauthorizedAccessException) { }
+            catch (IOException) { }
         }
     }
 
-    private sealed class GitIgnoreMatcher
+    private static string Normalize(string path) => path.Replace(Path.DirectorySeparatorChar, '/');
+
+    private sealed record IgnoreRule(string Root, Regex Pattern, bool DirectoryOnly, bool Negated, int Priority)
     {
-        private readonly string _root;
-        private readonly Regex[] _patterns;
-
-        private GitIgnoreMatcher(string root, Regex[] patterns)
+        public static IgnoreRule Create(string root, string pattern, int priority = 0)
         {
-            _root = root;
-            _patterns = patterns;
+            var negated = pattern.StartsWith('!');
+            if (negated) pattern = pattern[1..];
+            var directoryOnly = pattern.EndsWith('/');
+            pattern = pattern.TrimEnd('/');
+            var anchored = pattern.StartsWith('/') || pattern.Contains('/');
+            pattern = pattern.TrimStart('/');
+            return new IgnoreRule(root, new Regex(GlobToRegex(pattern, anchored), RegexOptions.CultureInvariant,
+                TimeSpan.FromSeconds(1)), directoryOnly, negated, priority);
         }
 
-        public static GitIgnoreMatcher? TryCreate(string searchPath)
+        public bool Matches(string relative, bool isDirectory) =>
+            (!DirectoryOnly || isDirectory) && Pattern.IsMatch(relative);
+    }
+
+    private static string GlobToRegex(string glob, bool anchored)
+    {
+        var result = new StringBuilder(anchored ? "^" : "(?:^|/)");
+        var braceDepth = 0;
+        for (var i = 0; i < glob.Length; i++)
         {
-            var root = FindRepositoryRoot(searchPath);
-            if (root is null)
-                return null;
-
-            var ignoreFile = Path.Combine(root, ".gitignore");
-            if (!File.Exists(ignoreFile))
-                return new GitIgnoreMatcher(root, []);
-
-            var patterns = File.ReadLines(ignoreFile)
-                .Select(ToDirectoryRegex)
-                .Where(pattern => pattern is not null)
-                .Select(pattern => pattern!)
-                .ToArray();
-            return new GitIgnoreMatcher(root, patterns);
-        }
-
-        public bool IsIgnoredDirectory(string path)
-        {
-            if (string.Equals(Path.GetFileName(path), ".git", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            var relative = Path.GetRelativePath(_root, path).Replace(Path.DirectorySeparatorChar, '/');
-            return _patterns.Any(pattern => pattern.IsMatch(relative));
-        }
-
-        private static string? FindRepositoryRoot(string path)
-        {
-            var directory = new DirectoryInfo(path);
-            while (directory is not null)
+            switch (glob[i])
             {
-                if (File.Exists(Path.Combine(directory.FullName, ".git")) ||
-                    Directory.Exists(Path.Combine(directory.FullName, ".git")))
-                    return directory.FullName;
-                directory = directory.Parent;
-            }
-            return null;
-        }
-
-        private static Regex? ToDirectoryRegex(string line)
-        {
-            line = line.Trim();
-            if (line.Length == 0 || line.StartsWith('#') || line.StartsWith('!'))
-                return null;
-
-            line = line.TrimEnd('/');
-            if (line.Length == 0)
-                return null;
-
-            var anchored = line.StartsWith('/');
-            line = line.TrimStart('/');
-            var expression = GlobToRegex(line, anchored);
-            return new Regex(expression, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        }
-
-        private static string GlobToRegex(string glob, bool anchored)
-        {
-            var result = new StringBuilder("^");
-            if (!anchored) result.Append("(?:.*/)?");
-
-            for (var i = 0; i < glob.Length; i++)
-            {
-                if (glob[i] == '*' && i + 1 < glob.Length && glob[i + 1] == '*')
-                {
-                    result.Append(".*");
+                case '*' when i + 1 < glob.Length && glob[i + 1] == '*':
                     i++;
-                }
-                else if (glob[i] == '*') result.Append("[^/]*");
-                else if (glob[i] == '?') result.Append("[^/]");
-                else result.Append(Regex.Escape(glob[i].ToString()));
+                    if (i + 1 < glob.Length && glob[i + 1] == '/') { result.Append("(?:.*/)?"); i++; }
+                    else result.Append(".*");
+                    break;
+                case '*': result.Append("[^/]*"); break;
+                case '?': result.Append("[^/]"); break;
+                case '{' when glob.IndexOf('}', i + 1) >= 0:
+                    result.Append("(?:"); braceDepth++; break;
+                case ',' when braceDepth > 0: result.Append('|'); break;
+                case '}' when braceDepth > 0: result.Append(')'); braceDepth--; break;
+                case '[':
+                    var end = glob.IndexOf(']', i + 1);
+                    if (end < 0) { result.Append(@"\["); break; }
+                    result.Append('[');
+                    var content = glob[(i + 1)..end];
+                    if (content.StartsWith('!')) content = "^" + content[1..];
+                    result.Append(content.Replace(@"\", @"\\")).Append(']');
+                    i = end;
+                    break;
+                case '\\' when i + 1 < glob.Length: result.Append(Regex.Escape(glob[++i].ToString())); break;
+                default: result.Append(Regex.Escape(glob[i].ToString())); break;
             }
-
-            return result.Append("(?:/.*)?$").ToString();
         }
+        return result.Append('$').ToString();
+    }
+
+    private sealed class Options
+    {
+        public string Pattern = "";
+        public readonly List<string> Paths = [];
+        public readonly HashSet<char> Types = [];
+        public readonly List<string> Extensions = [];
+        public readonly List<string> Excludes = [];
+        public bool? IgnoreCase;
+        public bool Glob, FixedStrings, Hidden, NoIgnore, FullPath, AbsolutePath, Help;
+        public int MaxDepth = int.MaxValue;
     }
 }
