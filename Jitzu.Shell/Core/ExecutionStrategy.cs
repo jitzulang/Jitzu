@@ -7,6 +7,7 @@ using Jitzu.Core;
 using Jitzu.Core.Language;
 using Jitzu.Core.Logging;
 using Jitzu.Core.Runtime;
+using Jitzu.Shell.Core.Commands;
 
 namespace Jitzu.Shell.Core;
 
@@ -67,14 +68,32 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
     {
         // Parse I/O redirection before splitting args
         var (command, redirect) = ParseRedirection(input);
+        var isExec = ExecCommand.IsExec(command);
+        if (isExec && FindTopLevelPipes(command).Count > 0)
+            return await ExecuteShellPipelineAsync(input);
+        if (isExec && redirect.HasRedirection)
+            return new ShellResult(ResultType.Error, "", new Exception("exec: redirection is not supported")) { Status = 2 };
         if (redirect.HasRedirection)
             return await ExecuteWithRedirectionAsync(command, redirect);
 
-        var args = CommandLineParser.SplitCommandLine(command).ToArray();
+        string[] args;
+        try
+        {
+            args = isExec ? ExecCommand.SplitArguments(command) : CommandLineParser.SplitCommandLine(command).ToArray();
+        }
+        catch (ArgumentException ex) when (isExec)
+        {
+            return new ShellResult(ResultType.Error, "", ex) { Status = 2 };
+        }
+        if (args.Length == 0)
+            return new ShellResult(ResultType.Jitzu, "", null);
         args = ExpandGlobs(args);
         if (labelManager is not null)
             for (var i = 1; i < args.Length; i++)
                 args[i] = labelManager.ExpandLabel(args[i]);
+
+        if (isExec)
+            return await builtins.ExecuteAsync("exec", args[1..].AsMemory());
 
         // Special single file cases, try to execute them
         if (File.Exists(args[0]))
@@ -1622,7 +1641,11 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
 
 }
 
-public record ShellResult(ResultType Type, string? Output, Exception? Error);
+public record ShellResult(ResultType Type, string? Output, Exception? Error)
+{
+    public int? Status { get; init; }
+    public int ExitCode => Status ?? (Error is null ? 0 : 1);
+}
 
 public record RedirectionInfo(string? OutputFile, string? InputFile, bool Append)
 {

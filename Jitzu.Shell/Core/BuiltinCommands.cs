@@ -13,7 +13,7 @@ public class BuiltinCommands
     private readonly FrozenSet<string> _commands;
     private static readonly string[] CommandNamesCore =
     [
-        "cd", "exit", "quit", "clear", "help", "reset", "vars", "types", "functions",
+        "cd", "exit", "quit", "exec", "clear", "help", "reset", "vars", "types", "functions",
         "alias", "unalias", "aliases", "label", "unlabel", "labels", "mkdir", "cat", "pwd",
         "echo", "touch", "rm", "mv", "cp", "history", "env", "head", "tail", "export", "unset",
         "grep", "wc", "sort", "uniq", "find", "diff", "time", "watch", "more", "less", "jobs",
@@ -88,6 +88,7 @@ public class BuiltinCommands
             {
             "cd" => new CdCommand(_context),
             "exit" => new ExitCommand(_context),
+            "exec" => new ExecCommand(_context),
             "clear" => new ClearCommand(_context),
             "help" => new HelpCommand(_context),
             "reset" => new ResetCommand(_context),

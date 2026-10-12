@@ -93,6 +93,7 @@ Built-in Commands:
   reset          - Reset the session
   clear          - Clear the screen
   exit/quit      - Exit the shell
+  exec [--] cmd  - Replace the shell with an external command (Linux/macOS)
   monitor        - Full-screen activity monitor (CPU, RAM, processes)
   help           - Show this help message
 

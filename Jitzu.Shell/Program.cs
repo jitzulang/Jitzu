@@ -191,7 +191,7 @@ static async Task<int> ExecuteCommand(string command, bool persist, bool loadUse
 
         DisplayResult(result, theme);
 
-        return result.Error is null ? 0 : 1;
+        return result.ExitCode;
     }
     finally
     {
