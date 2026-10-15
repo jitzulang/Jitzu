@@ -19,6 +19,10 @@ StartupProfiler.Mark("managed-entry");
 Console.OutputEncoding = Encoding.UTF8;
 EnableAnsiSupport();
 
+// Git's default LESS=FRX disables the alternate screen, leaving resize redraws in scrollback.
+if (Environment.GetEnvironmentVariable("LESS") is null)
+    Environment.SetEnvironmentVariable("LESS", "FR");
+
 var (hostArgs, scriptArgs) = JitzuOptions.SplitArgs(args);
 var options = JitzuOptions.Parse(hostArgs);
 StartupProfiler.Mark("options-parsed");

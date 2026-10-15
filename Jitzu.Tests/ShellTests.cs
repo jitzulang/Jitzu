@@ -190,6 +190,20 @@ public class ShellTests
     }
 
     [Test]
+    [Arguments(null, "FR")]
+    [Arguments("-R -S", "-R -S")]
+    [Arguments("", "")]
+    public async Task PagerOptions_DefaultToAlternateScreenAndPreserveUserSettings(
+        string? inheritedOptions, string expectedOptions)
+    {
+        var (output, exitCode) = await RunPipedAsync("echo $LESS\n",
+            new Dictionary<string, string?> { ["LESS"] = inheritedOptions });
+
+        exitCode.ShouldBe(0);
+        output.Trim().ShouldBe(expectedOptions);
+    }
+
+    [Test]
     public async Task CommandMode_ExitStopsTheRemainingChain()
     {
         var marker = Path.Combine(Path.GetTempPath(), $"jitzu-exit-chain-{Guid.NewGuid():N}");
@@ -237,9 +251,13 @@ public class ShellTests
         return (await outputTask, process.ExitCode);
     }
 
-    private static async Task<(string output, int exitCode)> RunPipedAsync(string stdin)
+    private static async Task<(string output, int exitCode)> RunPipedAsync(string stdin,
+        IReadOnlyDictionary<string, string?>? environment = null)
     {
         var startInfo = CreateRedirectedStartInfo();
+        if (environment is not null)
+            foreach (var (name, value) in environment)
+                startInfo.Environment[name] = value;
         startInfo.ArgumentList.Add("--no-persist");
         startInfo.ArgumentList.Add("--no-splash");
         startInfo.ArgumentList.Add("--no-config");

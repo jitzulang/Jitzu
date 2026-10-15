@@ -106,6 +106,15 @@ For tab colors in Windows Terminal, use static profile or launch-time configurat
 
 <CodeBlock language="shell" code={`wt new-tab --tabColor "#87af87"`} />
 
+## Pagers
+
+When `LESS` is unset, Jitzu sets it to `FR`. This lets Git's `less` pager use the
+alternate screen, so resizing redraws the page without adding repeated text to
+scrollback. Colors are preserved, and output that fits on one screen exits immediately.
+
+An existing `LESS` value is preserved. To choose different options, set `LESS` before
+starting Jitzu or add an `export LESS="..."` command to your startup configuration.
+
 ## Startup Configuration
 
 The file `~/.jitzu/config.jz` is executed automatically when the shell starts,
