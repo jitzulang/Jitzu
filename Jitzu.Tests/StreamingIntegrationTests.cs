@@ -39,7 +39,7 @@ public class StreamingIntegrationTests
     }
 
     [Test]
-    public async Task StreamingPipeline_FirstCommand_StopsEarly()
+    public async Task StreamingPipeline_FirstCommand_ReturnsFirstLine()
     {
         var output = await RunCommandAsync("seq 1 1000 | first");
         output.ShouldBe("1");
@@ -104,29 +104,10 @@ public class StreamingIntegrationTests
     [Test]
     public async Task StreamingPipeline_SortCommand_SortsOutput()
     {
-        var tempFile = Path.GetTempFileName();
-        try
-        {
-            await File.WriteAllLinesAsync(tempFile, new[] { "zebra", "apple", "monkey" });
+        var output = await RunCommandAsync("seq 1 11 | sort");
+        var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
-            var output = await RunCommandAsync($"cat {tempFile} | sort");
-
-            // Cat adds line numbers like "1  zebra", extract just the text
-            var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                .Select(l => {
-                    var parts = l.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                    return parts.Length > 1 ? parts[1] : parts[0];
-                })
-                .ToList();
-
-            lines.ShouldContain("apple");
-            lines.ShouldContain("monkey");
-            lines.ShouldContain("zebra");
-        }
-        finally
-        {
-            File.Delete(tempFile);
-        }
+        lines.ShouldBe(["1", "10", "11", "2", "3", "4", "5", "6", "7", "8", "9"]);
     }
 
     [Test]
@@ -135,13 +116,12 @@ public class StreamingIntegrationTests
         var tempFile = Path.GetTempFileName();
         try
         {
-            await File.WriteAllLinesAsync(tempFile, new[] { "a", "a", "b", "b", "c" });
+            await File.WriteAllLinesAsync(tempFile, new[] { "a", "a", "b", "b", "c", "a" });
 
-            var output = await RunCommandAsync($"cat {tempFile} | uniq");
+            var output = await RunCommandAsync($"tail \"{tempFile}\" | uniq");
+            var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
-            output.ShouldContain("a");
-            output.ShouldContain("b");
-            output.ShouldContain("c");
+            lines.ShouldBe(["a", "b", "c", "a"]);
         }
         finally
         {
@@ -150,10 +130,10 @@ public class StreamingIntegrationTests
     }
 
     [Test]
-    public async Task StreamingPipeline_WcCommand_CountsLines()
+    public async Task StreamingPipeline_WcCommand_CountsLinesWordsAndCharacters()
     {
         var output = await RunCommandAsync("seq 1 10 | wc");
-        output.ShouldContain("10");
+        output.ShouldBe("10\t10\t21");
     }
 
     [Test]
@@ -198,7 +178,7 @@ public class StreamingIntegrationTests
     }
 
     [Test]
-    public async Task BuiltinCommand_CatWithPipe_Streams()
+    public async Task BuiltinCommand_CatWithPipe_LimitsOutput()
     {
         var tempFile = Path.GetTempFileName();
         try
@@ -207,9 +187,11 @@ public class StreamingIntegrationTests
 
             var output = await RunCommandAsync($"cat {tempFile} | head 3");
 
-            output.ShouldContain("Line 1");
-            output.ShouldContain("Line 2");
-            output.ShouldContain("Line 3");
+            var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            lines.Length.ShouldBe(3);
+            lines[0].ShouldEndWith("  Line 1");
+            lines[1].ShouldEndWith("  Line 2");
+            lines[2].ShouldEndWith("  Line 3");
         }
         finally
         {

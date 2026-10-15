@@ -327,8 +327,7 @@ public class StreamingPipelineTests
 
         // Assert
         result.Count.ShouldBe(5);
-        // With early termination, should process ~5 lines, not all 10000
-        processedCount.ShouldBeLessThan(100, $"Expected < 100 lines processed, but got {processedCount}");
+        processedCount.ShouldBe(5);
     }
 
     // Helper methods
