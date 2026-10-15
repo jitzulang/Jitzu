@@ -323,7 +323,7 @@ public class StartupSafetyTests
     }
 
     [Test]
-    public void TraceSnapshot_IsPrivateWriterLockedAndRemovedOnDispose()
+    public void TraceSnapshot_IsPrivateRejectsExclusiveAccessAndIsRemovedOnDispose()
     {
         var source = Path.Combine(Path.GetTempPath(), $"jitzu-trace-source-{Guid.NewGuid():N}");
         File.WriteAllText(source, "private trace bytes");
@@ -333,12 +333,19 @@ public class StartupSafetyTests
             using (var snapshot = TraceSnapshot.Create(source))
             {
                 snapshotPath = snapshot.Path;
+                File.ReadAllText(snapshot.Path).ShouldBe("private trace bytes");
                 Should.Throw<IOException>(() =>
                 {
                     using var _ = new FileStream(snapshot.Path, FileMode.Open, FileAccess.Write,
-                        FileShare.ReadWrite);
+                        FileShare.None);
                 });
-                if (!OperatingSystem.IsWindows())
+                if (OperatingSystem.IsWindows())
+                    Should.Throw<IOException>(() =>
+                    {
+                        using var _ = new FileStream(snapshot.Path, FileMode.Open, FileAccess.Write,
+                            FileShare.ReadWrite);
+                    });
+                else
                     File.GetUnixFileMode(Path.GetDirectoryName(snapshot.Path)!).ShouldBe(
                         UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             }
@@ -353,6 +360,8 @@ public class StartupSafetyTests
     [SupportedOSPlatform("windows")]
     public void ConPtyConstructorFailures_TerminateAndWaitForCreatedChildren()
     {
+        Skip.Unless(OperatingSystem.IsWindows(), "ConPTY requires Windows.");
+
         var systemRoot = Environment.GetEnvironmentVariable("SystemRoot")!;
         var executable = Path.Combine(systemRoot, "System32", "cmd.exe");
         var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -438,7 +447,7 @@ public class StartupSafetyTests
     }
 
     [Test]
-    public async Task OrdinaryHistoryAppendFailure_PreservesExistingBytesAndAnnouncesReadOnly()
+    public async Task HistoryWriteIoFailure_PreservesExistingBytesAndAnnouncesReadOnly()
     {
         var path = Path.Combine(Path.GetTempPath(), $"jitzu-history-failure-{Guid.NewGuid():N}");
         try
@@ -446,7 +455,7 @@ public class StartupSafetyTests
             await File.WriteAllTextAsync(path, "old\n");
             var history = new HistoryManager(true, path);
             history.Initialise();
-            await using (var blocker = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            await using (var blocker = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
                 await Should.ThrowAsync<IOException>(() => history.WriteAsync("new"));
 
             (await File.ReadAllTextAsync(path)).ShouldBe("old\n");
