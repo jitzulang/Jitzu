@@ -1,7 +1,7 @@
 namespace Jitzu.Shell.Core.Commands;
 
 /// <summary>
-/// Clears the console screen.
+/// Clears the console screen and scrollback buffer.
 /// </summary>
 public class ClearCommand : CommandBase
 {
@@ -9,7 +9,12 @@ public class ClearCommand : CommandBase
 
     public override Task<ShellResult> ExecuteAsync(ReadOnlyMemory<string> args)
     {
-        Console.Clear();
+        if (!Console.IsOutputRedirected)
+        {
+            Console.Clear();
+            // Console.Clear() can leave saved lines in the terminal's scrollback buffer.
+            Console.Write("\e[3J");
+        }
         return Task.FromResult(new ShellResult(ResultType.Jitzu, "", null));
     }
 }

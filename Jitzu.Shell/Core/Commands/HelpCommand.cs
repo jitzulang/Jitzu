@@ -89,7 +89,7 @@ Built-in Commands:
   types          - Show available types
   functions      - Show defined functions
   reset          - Reset the session
-  clear          - Clear the screen
+  clear          - Clear the screen and scrollback buffer
   exit/quit      - Exit the shell
   exec [--] cmd  - Replace the shell with an external command (Linux/macOS)
   monitor        - Full-screen activity monitor (CPU, RAM, processes)
