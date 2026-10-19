@@ -51,7 +51,7 @@ public class CompletionManager
               ?? [".EXE", ".CMD", ".BAT", ".COM", ".PS1"]
             : [".exe", ""];
 
-    public string[] GetCompletions(string input)
+    public Completion[] GetCompletions(string input)
     {
         var lastWord = ExtractLastWord(input);
         var completions = session.GetCompletionSuggestions(lastWord);
@@ -66,7 +66,7 @@ public class CompletionManager
             completions.AddRange(executableCompletions);
 
         completions.Sort(CompletionComparer.Instance);
-        return [.. completions.Select(c => c.Value)];
+        return [.. completions];
     }
 
     private Completion[] GetFileSystemCompletions(ReadOnlySpan<char> partial)

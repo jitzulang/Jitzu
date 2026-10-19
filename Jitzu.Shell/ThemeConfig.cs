@@ -62,6 +62,7 @@ public sealed class ThemeConfig
 
         ["dropdown.gutter"]   = "#404040",
         ["dropdown.status"]   = "#5f87af",
+        ["dropdown.warning"]  = "#d7af00",
     };
 
     private readonly IReadOnlyDictionary<string, string> _overrides;

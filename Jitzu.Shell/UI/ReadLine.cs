@@ -69,7 +69,7 @@ public class ReadLine(
 
     private List<char> _buffer = [];
     private bool _cancelPressed;
-    private string[]? _completions;
+    private Completion[]? _completions;
     private int _completionWordStart;
     private int _cursorPos;
     private int _historyIndex;
@@ -637,14 +637,14 @@ public class ReadLine(
             if (_completions.Length == 1)
             {
                 // Single completion — apply immediately, no dropdown
-                InsertCompletion(_completions[0]);
+                InsertCompletion(_completions[0].Value);
                 ClearCompletions();
                 UpdatePredictions();
             }
             else
             {
                 // Multiple completions — show dropdown, highlight first item
-                _dropdownItems = [.._completions];
+                _dropdownItems = [.._completions.Select(completion => completion.Value)];
                 _dropdownIndex = 0;
                 _dropdownIsCompletions = true;
             }
@@ -1011,7 +1011,7 @@ public class ReadLine(
         if (_completions == null || index < 0 || index >= _completions.Length)
             return;
 
-        InsertCompletion(_completions[index]);
+        InsertCompletion(_completions[index].Value);
     }
 
     /// <summary>
@@ -1155,6 +1155,7 @@ public class ReadLine(
         var selFg = theme["prediction.selected.fg"];
         var gutterColor = theme["dropdown.gutter"];
         var statusColor = theme["dropdown.status"];
+        var warningColor = theme["dropdown.warning"];
 
         // Choose gutter character based on mode: history predictions use "░ ", tab completions use "⏵ "
         var gutterChar = _dropdownIsCompletions ? "⏵ " : "░ ";
@@ -1167,18 +1168,22 @@ public class ReadLine(
 
             var isSelected = itemIndex == _dropdownIndex;
             var text = _dropdownItems[itemIndex];
+            var showMissingWarning = IsMissingPathCompletion(itemIndex);
 
-            var maxTextWidth = width - 2; // "X " gutter (2 chars)
+            var maxTextWidth = width - 2 - (showMissingWarning ? 1 : 0); // gutter + optional right-edge warning
+            if (maxTextWidth < 0)
+                maxTextWidth = 0;
             if (text.Length > maxTextWidth)
                 text = text[..maxTextWidth];
 
             var padding = maxTextWidth - text.Length;
             var pad = padding > 0 ? new string(' ', padding) : "";
+            var warning = showMissingWarning ? $"{warningColor}!{ThemeConfig.Reset}" : "";
 
             if (isSelected)
-                Console.Write($"{selBg}{selFg}{gutterChar}{text}{pad}{ThemeConfig.Reset}");
+                Console.Write($"{selBg}{selFg}{gutterChar}{text}{pad}{warning}{ThemeConfig.Reset}");
             else
-                Console.Write($"{dimColor}{gutterChar}{text}{pad}{ThemeConfig.Reset}");
+                Console.Write($"{dimColor}{gutterChar}{text}{pad}{warning}{ThemeConfig.Reset}");
         }
 
         // Status line
@@ -1200,6 +1205,32 @@ public class ReadLine(
         else
         {
             _dropdownLinesDrawn = visibleCount;
+        }
+    }
+
+    private bool IsMissingPathCompletion(int index)
+    {
+        if (!_dropdownIsCompletions || _completions is null || index < 0 || index >= _completions.Length)
+            return false;
+
+        return IsMissingPathCompletion(_completions[index], historyPathResolver);
+    }
+
+    internal static bool IsMissingPathCompletion(
+        Completion completion,
+        Func<string, string>? pathResolver = null)
+    {
+        if (completion is not DirectoryCompletion and not FileCompletion)
+            return false;
+
+        try
+        {
+            var path = pathResolver?.Invoke(completion.Value) ?? completion.Value;
+            return !File.Exists(path) && !Directory.Exists(path);
+        }
+        catch
+        {
+            return true;
         }
     }
 
