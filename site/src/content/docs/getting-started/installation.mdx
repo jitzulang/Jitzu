@@ -26,6 +26,38 @@ WinGet is included with current versions of Windows 10 and Windows 11.
 <CodeBlock language="powershell" code={`scoop bucket add jitzu https://github.com/jitzulang/jitzu
 scoop install jz`} />
 
+### Arch Linux
+
+The recommended Arch installation uses Jitzu's signed pacman repository. Download
+the public signing key, inspect its fingerprint, and compare it with the
+[published fingerprint and repository details](https://github.com/jitzulang/jitzu/blob/main/packaging/arch/REPOSITORY.md#installation)
+before trusting it:
+
+<CodeBlock language="bash" code={`curl -O https://packages.jitzu.dev/arch/x86_64/jitzu-signing-key.asc
+gpg --show-keys --with-fingerprint jitzu-signing-key.asc`} />
+
+After confirming the full fingerprint is
+`A239257C5BF7E6D68EF823C48E1ADE54F78F6A5B`, add and locally trust the key:
+
+<CodeBlock language="bash" code={`sudo pacman-key --add jitzu-signing-key.asc
+sudo pacman-key --lsign-key A239257C5BF7E6D68EF823C48E1ADE54F78F6A5B`} />
+
+Add this repository entry to `/etc/pacman.conf`:
+
+<CodeBlock language="ini" code={`[jitzu]
+SigLevel = PackageRequired DatabaseRequired
+Server = https://packages.jitzu.dev/arch/$arch`} />
+
+Then install Jitzu and receive future updates with pacman:
+
+<CodeBlock language="bash" code={`sudo pacman -Syu jz-bin`} />
+
+The repository supports x86_64. You can also install from the
+[AUR](https://aur.archlinux.org/packages/jz-bin) or download a standalone package
+from the [GitHub releases page](https://github.com/jitzulang/jitzu/releases). The
+standalone package requires manual installation and does not update through
+`pacman -Syu`.
+
 ## Self-Contained Binary
 
 The self-contained binary bundles the .NET runtime, so it works on any machine with no
