@@ -10,6 +10,7 @@ public class CommandContext
     public AliasManager? AliasManager { get; }
     public LabelManager? LabelManager { get; }
     public HistoryManager? HistoryManager { get; }
+    public HandoffRegistry? HandoffRegistry { get; }
     public ExecutionStrategy? Strategy { get; set; }
     public BuiltinCommands? BuiltinCommands { get; set; }
     public bool ExitRequested { get; set; }
@@ -19,12 +20,14 @@ public class CommandContext
         ThemeConfig theme,
         AliasManager? aliasManager = null,
         LabelManager? labelManager = null,
-        HistoryManager? historyManager = null)
+        HistoryManager? historyManager = null,
+        HandoffRegistry? handoffRegistry = null)
     {
         Session = session;
         Theme = theme;
         AliasManager = aliasManager;
         LabelManager = labelManager;
         HistoryManager = historyManager;
+        HandoffRegistry = handoffRegistry;
     }
 }

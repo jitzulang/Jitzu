@@ -14,6 +14,7 @@ public abstract class CommandBase : IBuiltinCommand
     protected AliasManager? AliasManager => Context.AliasManager;
     protected LabelManager? LabelManager => Context.LabelManager;
     protected HistoryManager? HistoryManager => Context.HistoryManager;
+    protected HandoffRegistry? HandoffRegistry => Context.HandoffRegistry;
     protected ExecutionStrategy? Strategy => Context.Strategy;
 
     protected CommandBase(CommandContext context)

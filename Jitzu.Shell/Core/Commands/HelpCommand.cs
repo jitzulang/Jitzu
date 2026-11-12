@@ -85,6 +85,8 @@ Built-in Commands:
   label n path   - Map a label to a path (e.g. label git D:/git)
   unlabel name   - Remove a path label
   labels         - List all path labels
+  handoff c v a  - After command c, run action a with what c wrote to the file in $v
+  unhandoff c    - Remove the handoffs for command c
   vars           - Show defined variables
   types          - Show available types
   functions      - Show defined functions

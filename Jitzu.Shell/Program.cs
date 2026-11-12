@@ -187,8 +187,9 @@ static async Task<int> ExecuteCommand(string command, bool persist, bool loadUse
         var aliasManager = new AliasManager(persist);
         aliasManager.Initialise();
         var labelManager = new LabelManager();
-        var builtins = new BuiltinCommands(session, theme, aliasManager, labelManager);
-        var strategy = new ExecutionStrategy(session, builtins, aliasManager, labelManager);
+        var handoffRegistry = new HandoffRegistry();
+        var builtins = new BuiltinCommands(session, theme, aliasManager, labelManager, handoffRegistry: handoffRegistry);
+        var strategy = new ExecutionStrategy(session, builtins, aliasManager, labelManager, handoffRegistry);
         builtins.SetStrategy(strategy);
 
         var result = await strategy.ExecuteAsync(command);
@@ -226,8 +227,9 @@ static async Task RunReplAsync(JitzuOptions options)
         Console.Error.WriteLine($"Warning: alias persistence disabled: {aliasWarning}");
     StartupProfiler.Mark("state-loaded");
     var labelManager = new LabelManager();
-    var builtins = new BuiltinCommands(session, theme, aliasManager, labelManager, history);
-    var strategy = new ExecutionStrategy(session, builtins, aliasManager, labelManager);
+    var handoffRegistry = new HandoffRegistry();
+    var builtins = new BuiltinCommands(session, theme, aliasManager, labelManager, history, handoffRegistry: handoffRegistry);
+    var strategy = new ExecutionStrategy(session, builtins, aliasManager, labelManager, handoffRegistry);
     builtins.SetStrategy(strategy);
     StartupProfiler.Mark("commands-registered");
     var userProfilePath = GetUserProfilePath();
@@ -467,8 +469,9 @@ static async Task HandleElevatedEntry(JitzuOptions options)
             var aliasManager = new AliasManager(options.Persist);
             aliasManager.Initialise();
             var labelManager = new LabelManager();
-            var builtins = new BuiltinCommands(session, theme, aliasManager, labelManager);
-            var strategy = new ExecutionStrategy(session, builtins, aliasManager, labelManager);
+            var handoffRegistry = new HandoffRegistry();
+            var builtins = new BuiltinCommands(session, theme, aliasManager, labelManager, handoffRegistry: handoffRegistry);
+            var strategy = new ExecutionStrategy(session, builtins, aliasManager, labelManager, handoffRegistry);
             builtins.SetStrategy(strategy);
 
             var result = await strategy.ExecuteAsync(command);

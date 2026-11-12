@@ -20,7 +20,7 @@ public class BuiltinCommands
         "fg", "bg", "wget", "kill", "killall", "tee", "ln", "stat", "chmod", "unblock", "whoami",
         "who", "hostname", "uptime", "sleep", "yes", "basename", "dirname", "du", "df", "tr", "cut",
         "seq", "rev", "tac", "paste", "date", "mktemp", "true", "false", "monitor", "sudo", "where",
-        "neofetch", "upgrade", "path", "view"
+        "neofetch", "upgrade", "path", "view", "handoff", "unhandoff"
     ];
     private readonly CommandContext _context;
     private SudoCommand? _sudo;
@@ -31,9 +31,9 @@ public class BuiltinCommands
     /// </summary>
     public void SetStrategy(ExecutionStrategy strategy) => _context.Strategy = strategy;
 
-    public BuiltinCommands(ShellSession session, ThemeConfig theme, AliasManager? aliasManager = null, LabelManager? labelManager = null, HistoryManager? historyManager = null)
+    public BuiltinCommands(ShellSession session, ThemeConfig theme, AliasManager? aliasManager = null, LabelManager? labelManager = null, HistoryManager? historyManager = null, HandoffRegistry? handoffRegistry = null)
     {
-        _context = new CommandContext(session, theme, aliasManager, labelManager, historyManager);
+        _context = new CommandContext(session, theme, aliasManager, labelManager, historyManager, handoffRegistry);
         _context.BuiltinCommands = this;
 
         _commands = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
@@ -101,6 +101,8 @@ public class BuiltinCommands
             "label" => new LabelCommand(_context),
             "unlabel" => new UnlabelCommand(_context),
             "labels" => new ListLabelsCommand(_context),
+            "handoff" => new HandoffCommand(_context),
+            "unhandoff" => new UnhandoffCommand(_context),
             "mkdir" => new MkdirCommand(_context),
             "cat" => new CatCommand(_context),
             "pwd" => new PwdCommand(_context),

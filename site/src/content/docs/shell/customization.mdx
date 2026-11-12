@@ -119,8 +119,8 @@ starting Jitzu or add an `export LESS="..."` command to your startup configurati
 
 The file `~/.jitzu/config.jz` is executed automatically when the shell starts,
 similar to `.bashrc` or `.zshrc`.
-Each line is run as a shell command, so you can set aliases, labels, environment variables,
-and define Jitzu functions that will be available in every session.
+Each line is run as a shell command, so you can set aliases, labels, handoffs, environment
+variables, and define Jitzu functions that will be available in every session.
 
 <CodeBlock language="jitzu" code={`// ~/.jitzu/config.jz
 
@@ -132,6 +132,9 @@ alias gp="git push"
 // Set up path labels
 label git ~/git
 label docs ~/Documents
+
+// Follow worktrunk into the worktree it switches to
+handoff git-wt WORKTRUNK_DIRECTIVE_CD_FILE cd
 
 // Set environment variables
 export EDITOR=nvim
@@ -219,3 +222,54 @@ Label removed: api`} />
 Labels expand transparently in file arguments, so commands
 like `cat api:src/Program.cs` and `ls api:` work
 as expected. Tab completion also understands label prefixes.
+
+## Handoffs
+
+A handoff lets an external command pass a value back to the shell. Some tools work this way:
+they read a file path from an environment variable, write a result into that file, and expect
+the shell to act on it once they exit.
+
+<CodeBlock language="shell" code={`handoff <command> <variable> <action...>`} />
+
+Each time `<command>` runs, Jitzu creates an empty temporary file and passes its path to the
+command in `<variable>`. After the command exits, Jitzu reads the file, trims surrounding
+whitespace, and runs `<action...>` with the contents as one final argument. The action runs
+whether the command succeeded or failed. An empty file runs nothing. The temporary file is
+deleted afterwards.
+
+- `<command>` matches the executable's file name, with or without its extension, so
+  `git-wt`, `git-wt.exe` and a full path to it all match. Matching ignores case on Windows.
+- `<variable>` is set for that command's process only. The shell's own environment and other
+  commands never see it.
+- `<action...>` is any builtin or external command, such as `cd`, `echo` or a script.
+- A command can have several handoffs, one per variable. Registering the same command and
+  variable again replaces the action.
+- Handoffs apply to commands run in the foreground. Pipelines, redirected commands and
+  background jobs run without them.
+
+Handoffs last for the session. Add them to `~/.jitzu/config.jz` to have them in every session.
+
+<CodeBlock language="shell" code={`> handoff git-wt WORKTRUNK_DIRECTIVE_CD_FILE cd
+git-wt $WORKTRUNK_DIRECTIVE_CD_FILE → cd
+
+> git-wt switch feature/search
+✓ Switched to worktree for feature/search @ ~/git/project.feature-search
+~/git/project.feature-search >
+
+> handoff
+git-wt $WORKTRUNK_DIRECTIVE_CD_FILE → cd
+
+> unhandoff git-wt
+Handoff removed: git-wt`} />
+
+### Worktrunk
+
+[Worktrunk](https://github.com/max-sixty/worktrunk) changes into the worktree it switches to
+by writing the target directory to the file named in `WORKTRUNK_DIRECTIVE_CD_FILE`. Register
+one handoff for each name you run it by:
+
+<CodeBlock language="jitzu" code={`handoff git-wt WORKTRUNK_DIRECTIVE_CD_FILE cd
+handoff wt WORKTRUNK_DIRECTIVE_CD_FILE cd`} />
+
+`git wt` (with a space) runs worktrunk as a child of git, and worktrunk does not change
+directory in that case. Run `git-wt` or `wt` instead.

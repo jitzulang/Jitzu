@@ -15,7 +15,7 @@ namespace Jitzu.Shell.Core;
 /// Determines whether to execute as Jitzu code or OS command.
 /// Strategy: Try Jitzu first, fall back to OS command on parse failure.
 /// </summary>
-public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, AliasManager? aliasManager = null, LabelManager? labelManager = null)
+public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, AliasManager? aliasManager = null, LabelManager? labelManager = null, HandoffRegistry? handoffRegistry = null)
 {
     private static readonly HashSet<string> PipeFunctions =
     [
@@ -914,11 +914,66 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
         return null;
     }
 
-    private static async Task<ShellResult> ExecuteOsCommandAsync(string[] args)
+    private async Task<ShellResult> ExecuteOsCommandAsync(string[] args)
+    {
+        var resolved = ResolveCommand(args[0]);
+        var handoffs = handoffRegistry?.For(resolved ?? args[0]) ?? [];
+        var handoffFiles = new List<(Handoff Handoff, string File)>(handoffs.Length);
+        try
+        {
+            foreach (var handoff in handoffs)
+                handoffFiles.Add((handoff, Path.GetTempFileName()));
+
+            var result = await RunOsProcessAsync(args, resolved, handoffFiles);
+            return await ApplyHandoffsAsync(handoffFiles, result);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new ShellResult(ResultType.Error, "", new Exception($"handoff: {ex.Message}", ex));
+        }
+        finally
+        {
+            foreach (var (_, file) in handoffFiles)
+                DeleteHandoffFile(file);
+        }
+    }
+
+    private static void DeleteHandoffFile(string file)
     {
         try
         {
-            var resolved = ResolveCommand(args[0]);
+            File.Delete(file);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"Warning: could not delete handoff file {file}: {ex.Message}");
+        }
+    }
+
+    private async Task<ShellResult> ApplyHandoffsAsync(List<(Handoff Handoff, string File)> handoffFiles, ShellResult result)
+    {
+        foreach (var (handoff, file) in handoffFiles)
+        {
+            var content = await File.ReadAllTextAsync(file);
+            var payload = content.Trim();
+            if (payload.Length == 0)
+                continue;
+
+            string[] actionArgs = [..handoff.Action, payload];
+            var actionResult = builtins.IsBuiltin(actionArgs[0])
+                ? await builtins.ExecuteAsync(actionArgs[0], actionArgs[1..].AsMemory())
+                : await ExecuteOsCommandAsync(actionArgs);
+            if (actionResult.Error is not null)
+                return actionResult;
+        }
+
+        return result;
+    }
+
+    private static async Task<ShellResult> RunOsProcessAsync(string[] args, string? resolved, List<(Handoff Handoff, string File)> handoffFiles)
+    {
+        try
+        {
             var startInfo = new ProcessStartInfo
             {
                 FileName = resolved ?? args[0],
@@ -941,6 +996,9 @@ public class ExecutionStrategy(ShellSession session, BuiltinCommands builtins, A
             var lsColors = Environment.GetEnvironmentVariable("LS_COLORS");
             if (!string.IsNullOrEmpty(lsColors))
                 startInfo.Environment["LS_COLORS"] = lsColors;
+
+            foreach (var (handoff, file) in handoffFiles)
+                startInfo.Environment[handoff.Variable] = file;
 
             using var process = Process.Start(startInfo);
             if (process == null)
